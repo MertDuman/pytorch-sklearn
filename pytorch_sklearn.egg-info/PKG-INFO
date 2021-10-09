@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: pytorch-sklearn
+Version: 0.1.0
+Summary: Implements fit, predict and other useful ways of training with PyTorch.
+Home-page: UNKNOWN
+Author: Mert Duman
+Author-email: UNKNOWN
+License: MIT
+Description: UNKNOWN
+Platform: UNKNOWN
