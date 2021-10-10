@@ -28,6 +28,8 @@ TODO:
 5) Allow direct read access from NeuralNetwork to History.
 
 6) Validation needs batch size as well, because the data might not fit into memory. [DONE]
+
+7) Test needs batch size as well.
 """
 
 
