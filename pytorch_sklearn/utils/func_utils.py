@@ -40,7 +40,7 @@ def to_tensor(X: np.ndarray, device=None, dtype=None, clone=True):
 
 def to_safe_tensor(X: torch.Tensor, clone=True):
     """
-    Convert the given ``torch.Tensor`` to another one that is more operable on.
+    Convert the given ``torch.Tensor`` to another one that is detached and is in cpu.
     ``clone`` is set to True by default to mitigate side-effects that this function might cause.
     For instance:
         ``torch.Tensor.cpu`` will clone the object if it is in GPU, but won't if it is in CPU.

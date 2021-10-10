@@ -13,6 +13,24 @@ from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor
 
 
+"""
+TODO:
+1) If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
+   Maybe produce a warning which asks if we should continue training with these new weights.
+   
+2) Currently, neither of predict(), predict_proba(), and score() can evaluate the performance of the model based on some
+   metric other than self.criterion. For instance, we can't get the model accuracy in a simple way.
+   
+3) Documentation missing.
+
+4) predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
+
+5) Allow direct read access from NeuralNetwork to History.
+
+6) Validation needs batch size as well, because the data might not fit into memory.
+"""
+
+
 class NeuralNetwork:
     @property
     def callbacks(self):
@@ -47,7 +65,7 @@ class NeuralNetwork:
         self._epoch = None
         self._batch = None
         self._batch_X = None
-        self._batch_Y = None
+        self._batch_y = None
         self._batch_out = None
         self._batch_loss = None
         self._pass_type = None
