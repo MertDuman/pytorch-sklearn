@@ -27,7 +27,7 @@ TODO:
 
 5) Allow direct read access from NeuralNetwork to History.
 
-6) Validation needs batch size as well, because the data might not fit into memory.
+6) Validation needs batch size as well, because the data might not fit into memory. [DONE]
 """
 
 
@@ -157,7 +157,7 @@ class NeuralNetwork:
         # Define DataLoaders
         self._train_loader = self.get_dataloader(self._train_X, self._train_y, self._batch_size, shuffle=True)
         if self._validate:
-            self._val_loader = self.get_dataloader(self._val_X, self._val_y, len(self._val_y), shuffle=True)
+            self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=True)
 
         # Begin Fit
         self.module = self.module.to(self._device)
