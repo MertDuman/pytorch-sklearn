@@ -19,7 +19,10 @@ class CallbackManager:
 
     @property
     def callbacks(self):
-        return self._default_callbacks + self._callbacks
+        if self._callbacks is not None:
+            return self._default_callbacks + self._callbacks
+        else:
+            return self._default_callbacks
 
     @callbacks.setter
     def callbacks(self, cbs):

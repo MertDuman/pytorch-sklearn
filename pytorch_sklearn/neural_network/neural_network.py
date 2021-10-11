@@ -15,21 +15,23 @@ from pytorch_sklearn.utils.func_utils import to_tensor
 
 """
 TODO:
-1) If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
+- If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
    
-2) Currently, neither of predict(), predict_proba(), and score() can evaluate the performance of the model based on some
+- Currently, neither of predict(), predict_proba(), and score() can evaluate the performance of the model based on some
    metric other than self.criterion. For instance, we can't get the model accuracy in a simple way.
    
-3) Documentation missing.
+- Documentation missing.
 
-4) predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
+- predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
-5) Allow direct read access from NeuralNetwork to History.
+- Allow direct read access from NeuralNetwork to History.
 
-6) Validation needs batch size as well, because the data might not fit into memory. [DONE]
+- self._train_X, self._train_y, etc. are kept as input type and not Tensor.
 
-7) Test needs batch size as well.
+- Test needs batch size as well. [DONE]
+
+- DefaultDataset requires ground truth values. Make it so that you can only pass X. [DONE]
 """
 
 
@@ -75,21 +77,37 @@ class NeuralNetwork:
         self._train_loader = None
         self._val_loader = None
 
-        # Predict runtime parameters
+        # Predict function parameters
         self._test_X = None
         self._decision_func = None
         self._decision_func_kw = None
-        self._y_pred = None
 
-        # Predict proba runtime parameters
+        # Predict runtime parameters
+        self._predict_loader = None
+        self._pred_y = None
+        self._batch = None
+        self._batch_X = None
+
+        # Predict Proba function parameters
         self._test_X = None
-        self._proba = None
 
-        # Score runtime parameters
+        # Predict Proba runtime parameters
+        self._predict_proba_loader = None
+        self._proba = None
+        self._batch = None
+        self._batch_X = None
+
+        # Score function parameters
         self._test_X = None
         self._test_y = None
+
+        # Score runtime parameters
+        self._score_loader = None
         self._out = None
         self._score = None
+        self._batch = None
+        self._batch_X = None
+        self._batch_y = None
 
     # Model Training Core Functions
     def forward(self, X: torch.Tensor):
@@ -210,26 +228,35 @@ class NeuralNetwork:
         predict_params = locals().copy()
         set_properties_hidden(**predict_params)
 
-        self._test_X = self._to_tensor(self._test_X)
+        self._predict_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+
         with torch.no_grad():
             self.test()
             self._notify("on_predict_begin")
-            self._y_pred = self.forward(self._test_X)
-            if self._decision_func is not None:
-                self._y_pred = self._decision_func(self._y_pred, **self._decision_func_kw)
+            self._pred_y = []
+            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+                pred_y = self.forward(self._batch_X)
+                if self._decision_func is not None:
+                    pred_y = self._decision_func(pred_y, **self._decision_func_kw)
+                self._pred_y.append(pred_y)
+            self._pred_y = torch.cat(self._pred_y)
             self._notify("on_predict_end")
-        return self._y_pred
+        return self._pred_y
 
     def predict_proba(self, test_X):
         #  Set predict_proba class parameters
         proba_params = locals().copy()
         set_properties_hidden(**proba_params)
 
-        self._test_X = self._to_tensor(self._test_X)
+        self._predict_proba_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+
         with torch.no_grad():
             self.test()
             self._notify("on_predict_proba_begin")
-            self._proba = self.forward(self._test_X)
+            self._proba = []
+            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+                self._proba.append(self.forward(self._batch_X))
+            self._proba = torch.cat(self._proba)
             self._notify("on_predict_proba_end")
         return self._proba
 
@@ -238,12 +265,19 @@ class NeuralNetwork:
         score_params = locals().copy()
         set_properties_hidden(**score_params)
 
-        self._test_X = self._to_tensor(self._test_X)
-        self._test_y = self._to_tensor(self._test_y)
+        self._score_loader = self.get_dataloader(self._test_X, self._test_y, self._batch_size, shuffle=False)
+
         with torch.no_grad():
             self.test()
-            self._out = self.forward(self._test_X)
-            self._score = self.get_loss(self._out, self._test_y)
+            self._out = []
+            self._score = []
+            for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
+                batch_out = self.forward(self._batch_X)
+                batch_loss = self.get_loss(batch_out, self._batch_y)
+                self._out.append(batch_out)
+                self._score.append(batch_loss)
+            self._out = torch.cat(self._out)
+            self._score = torch.cat(self._score).mean()
         return self._score
 
     def _notify(self, method_name, **cb_kwargs):
