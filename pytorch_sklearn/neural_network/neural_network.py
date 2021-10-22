@@ -29,9 +29,11 @@ TODO:
 
 - self._train_X, self._train_y, etc. are kept as input type and not Tensor.
 
-- Test needs batch size as well. [DONE]
-
-- DefaultDataset requires ground truth values. Make it so that you can only pass X. [DONE]
+- self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
+  prediction from pretrained weights.
+  
+- If we train a second time when there is a weight checkpoint, and the checkpoint does not get any better,
+  then the weight checkpoint class overwrites the current best weights with None. [DONE]
 """
 
 

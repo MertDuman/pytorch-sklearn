@@ -309,6 +309,8 @@ class WeightCheckpoint(Callback):
 
     def on_fit_end(self, net):
         if self.savepath is not None:
+            if self._tally.best_weights is None:
+                self._tally.best_weights = self.best_weights  # This can happen if we train the net a second time.
             torch.save(self._tally.best_weights, self.savepath)
             self._tally.best_weights = None  # No need to keep it in memory after saving.
 
