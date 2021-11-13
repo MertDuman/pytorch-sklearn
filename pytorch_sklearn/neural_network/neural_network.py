@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from pytorch_sklearn.utils import DefaultDataset
 from pytorch_sklearn.callbacks import CallbackManager
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
-from pytorch_sklearn.utils.func_utils import to_tensor
+from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
 
 
 """
@@ -19,15 +19,13 @@ TODO:
    Maybe produce a warning which asks if we should continue training with these new weights.
    
 - Currently, neither of predict(), predict_proba(), and score() can evaluate the performance of the model based on some
-   metric other than self.criterion. For instance, we can't get the model accuracy in a simple way.
+   metric other than self.criterion. For instance, we can't get the model accuracy in a simple way. [DONE]
    
 - Documentation missing.
 
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
 - Allow direct read access from NeuralNetwork to History.
-
-- self._train_X, self._train_y, etc. are kept as input type and not Tensor. [DONE]
 
 - self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
   prediction from pretrained weights.
@@ -102,6 +100,8 @@ class NeuralNetwork:
         # Score function parameters
         self._test_X = None
         self._test_y = None
+        self._score_func = None
+        self._score_func_kw = None
 
         # Score runtime parameters
         self._score_loader = None
@@ -268,7 +268,7 @@ class NeuralNetwork:
             self._notify("on_predict_proba_end")
         return self._proba
 
-    def score(self, test_X, test_y):
+    def score(self, test_X, test_y, score_func=None, **score_func_kw):
         #  Set score class parameters
         score_params = locals().copy()
         set_properties_hidden(**score_params)
@@ -283,11 +283,14 @@ class NeuralNetwork:
             self._score = []
             for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
                 batch_out = self.forward(self._batch_X)
-                batch_loss = self.get_loss(batch_out, self._batch_y)
+                if self._score_func is None:
+                    batch_loss = self.get_loss(batch_out, self._batch_y).item()
+                else:
+                    batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), **self._score_func_kw)
                 self._out.append(batch_out)
                 self._score.append(batch_loss)
             self._out = torch.cat(self._out)
-            self._score = torch.stack(self._score).mean()  # stack here instead of cat because self._score is 0-dimensional
+            self._score = torch.Tensor(self._score).mean()
         return self._score
 
     def _notify(self, method_name, **cb_kwargs):
@@ -297,6 +300,9 @@ class NeuralNetwork:
 
     def _to_tensor(self, X):
         return to_tensor(X, device=self._device, clone=False)
+
+    def _to_safe_tensor(self, X):
+        return to_safe_tensor(X, clone=False)
 
     def load_weights(self, weight_checkpoint):
         if self._using_original:
