@@ -27,13 +27,13 @@ TODO:
 
 - Allow direct read access from NeuralNetwork to History.
 
-- self._train_X, self._train_y, etc. are kept as input type and not Tensor.
+- self._train_X, self._train_y, etc. are kept as input type and not Tensor. [DONE]
 
 - self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
   prediction from pretrained weights.
   
-- If we train a second time when there is a weight checkpoint, and the checkpoint does not get any better,
-  then the weight checkpoint class overwrites the current best weights with None. [DONE]
+- Change history to keep session info separate from loss over epochs. For example keep an array of indices that show
+  on which epoch a new session starts.
 """
 
 
@@ -177,8 +177,12 @@ class NeuralNetwork:
         self.cbmanager.callbacks = callbacks
 
         # Define DataLoaders
+        self._train_X = self._to_tensor(self._train_X)
+        self._train_y = self._to_tensor(self._train_y)
         self._train_loader = self.get_dataloader(self._train_X, self._train_y, self._batch_size, shuffle=True)
         if self._validate:
+            self._val_X = self._to_tensor(self._val_X)
+            self._val_y = self._to_tensor(self._val_y)
             self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=True)
 
         # Begin Fit
@@ -230,6 +234,7 @@ class NeuralNetwork:
         predict_params = locals().copy()
         set_properties_hidden(**predict_params)
 
+        self._test_X = self._to_tensor(self._test_X)
         self._predict_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
 
         with torch.no_grad():
@@ -250,13 +255,14 @@ class NeuralNetwork:
         proba_params = locals().copy()
         set_properties_hidden(**proba_params)
 
+        self._test_X = self._to_tensor(self._test_X)
         self._predict_proba_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
 
         with torch.no_grad():
             self.test()
             self._notify("on_predict_proba_begin")
             self._proba = []
-            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+            for self._batch, (self._batch_X) in enumerate(self._predict_proba_loader, start=1):
                 self._proba.append(self.forward(self._batch_X))
             self._proba = torch.cat(self._proba)
             self._notify("on_predict_proba_end")
@@ -267,6 +273,8 @@ class NeuralNetwork:
         score_params = locals().copy()
         set_properties_hidden(**score_params)
 
+        self._test_X = self._to_tensor(self._test_X)
+        self._test_y = self._to_tensor(self._test_y)
         self._score_loader = self.get_dataloader(self._test_X, self._test_y, self._batch_size, shuffle=False)
 
         with torch.no_grad():
@@ -279,7 +287,7 @@ class NeuralNetwork:
                 self._out.append(batch_out)
                 self._score.append(batch_loss)
             self._out = torch.cat(self._out)
-            self._score = torch.cat(self._score).mean()
+            self._score = torch.stack(self._score).mean()  # stack here instead of cat because self._score is 0-dimensional
         return self._score
 
     def _notify(self, method_name, **cb_kwargs):
