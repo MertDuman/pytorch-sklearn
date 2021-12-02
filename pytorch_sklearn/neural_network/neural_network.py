@@ -28,7 +28,10 @@ TODO:
   prediction from pretrained weights.
   
 - Change history to keep session info separate from loss over epochs. For example keep an array of indices that show
-  on which epoch a new session starts.
+  on which epoch a new session starts. [DONE]
+  
+- Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
+  history track on the first fit call.
 """
 
 

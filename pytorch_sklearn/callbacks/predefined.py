@@ -27,27 +27,29 @@ class History(Callback):
         super(History, self).__init__()
         self.name = "History"
         self.track = {}
+        self.sessions = []
         self.epoch_metrics = None
         self.num_metrics = -1
         self.session = -1
 
     def init_training(self, net):
-        self.track[self.session]["train_loss"] = []
+        self.track["train_loss"] = []
         for name in net._metrics.keys():
-            self.track[self.session][f"train_{name}"] = []
+            self.track[f"train_{name}"] = []
 
     def init_validation(self, net):
-        self.track[self.session]["val_loss"] = []
+        self.track["val_loss"] = []
         for name in net._metrics.keys():
-            self.track[self.session][f"val_{name}"] = []
+            self.track[f"val_{name}"] = []
 
     def on_fit_begin(self, net):
         self.session += 1
-        self.track[self.session] = {}  # new training session
         self.num_metrics = len(net._metrics) + 1
-        self.init_training(net)
-        if net._validate:
-            self.init_validation(net)
+        if self.session == 0:
+            self.init_training(net)
+            if net._validate:
+                self.init_validation(net)
+        self.sessions.append(len(self.track["train_loss"]) + 1)  # new session starts at epoch = len(train_loss) + 1
 
     def on_train_epoch_begin(self, net):
         self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics
@@ -63,9 +65,9 @@ class History(Callback):
 
     def _save_metrics(self, net):
         self.epoch_metrics = self.epoch_metrics / net._num_batches
-        self.track[self.session][f"{net._pass_type}_loss"].append(self.epoch_metrics[0])
+        self.track[f"{net._pass_type}_loss"].append(self.epoch_metrics[0])
         for i, name in enumerate(net._metrics.keys(), start=1):
-            self.track[self.session][f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
+            self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
 
     def on_train_batch_end(self, net):
         self._calculate_metrics(net)
@@ -195,17 +197,19 @@ class LossPlot(Callback):
 
         # Define empty lines for loss line
         self.axes[0, 0].set_title(f"{net.criterion.__class__.__name__}")
-        self.axes[0, 0].plot([], [], "-o")
+        self.axes[0, 0].plot([], [], "-o", label="train loss")
         if net._validate:
-            self.axes[0, 0].plot([], [], "-o")
+            self.axes[0, 0].plot([], [], "-o", label="val loss")
+        self.axes[0, 0].legend()
 
         # Define empty lines for other metric lines
         for i, name in enumerate(net._metrics.keys(), start=1):
             ax = self.axes[i // self.max_col, i % self.max_col]
             ax.set_title(f"{name.capitalize()}")
-            ax.plot([], [], "-o")
+            ax.plot([], [], "-o", label=f"train {name}")
             if net._validate:
-                ax.plot([], [], "-o")
+                ax.plot([], [], "-o", label=f"val {name}")
+            ax.legend()
 
         # h, l = self.axes[0, 0].get_legend_handles_labels()
         # self.fig.legend(l)
@@ -217,18 +221,18 @@ class LossPlot(Callback):
         self.plot_metrics(net)
 
     def plot_metrics(self, net):
-        track, sess = net.cbmanager.history.track, net.cbmanager.history.session
+        track = net.cbmanager.history.track
         line_idx = 0 if net._pass_type == "train" else 1
 
         # Change plot for loss line
-        data = track[sess][f"{net._pass_type}_loss"]
+        data = track[f"{net._pass_type}_loss"]
         self.axes[0, 0].lines[line_idx].set_data(np.arange(len(data)), data)
         self.axes[0, 0].relim()
         self.axes[0, 0].autoscale_view()
 
         # Change plot for other metric lines
         for i, name in enumerate(net._metrics.keys(), start=1):
-            data = track[sess][f"{net._pass_type}_{name}"]
+            data = track[f"{net._pass_type}_{name}"]
             ax = self.axes[i // self.max_col, i % self.max_col]
             ax.lines[line_idx].set_data(np.arange(len(data)), data)
             ax.relim()
@@ -237,10 +241,10 @@ class LossPlot(Callback):
         self.force_draw()
 
     def on_fit_end(self, net):
-        if self.block_on_finish:
-            plt.show(block=True)
         if self.savefig:
             self.fig.savefig(self.savename, bbox_inches="tight")
+        if self.block_on_finish:
+            plt.show(block=True)
         self.switch_normal(self.old_backend)
 
     def force_draw(self):
@@ -301,8 +305,8 @@ class WeightCheckpoint(Callback):
             self._track(net)
 
     def _track(self, net):
-        track, sess = net.cbmanager.history.track, net.cbmanager.history.session
-        new_record = track[sess][self._tally.recorded][-1]
+        track = net.cbmanager.history.track
+        new_record = track[self._tally.recorded][-1]
         self._tally.evaluate_record(new_record=new_record,
                                     best_epoch=net._epoch,
                                     best_weights=copy.deepcopy(net.module.state_dict()))
@@ -352,8 +356,8 @@ class EarlyStopping(Callback):
             self._track(net)
 
     def _track(self, net):
-        track, sess = net.cbmanager.history.track, net.cbmanager.history.session
-        new_record = track[sess][self._tally.recorded][-1]
+        track = net.cbmanager.history.track
+        new_record = track[self._tally.recorded][-1]
         is_better_record = self._tally.is_better_record(new_record)
 
         if is_better_record:
@@ -397,8 +401,8 @@ class Tracker(Callback):
             self._track(net)
 
     def _track(self, net):
-        track, sess = net.cbmanager.history.track, net.cbmanager.history.session
-        self._tally.evaluate_record(track[sess][self._tally.recorded][-1], best_epoch=net._epoch)
+        track = net.cbmanager.history.track
+        self._tally.evaluate_record(track[self._tally.recorded][-1], best_epoch=net._epoch)
 
 
 class Tally:
