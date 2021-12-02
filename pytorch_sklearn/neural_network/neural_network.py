@@ -18,9 +18,6 @@ TODO:
 - If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
    
-- Currently, neither of predict(), predict_proba(), and score() can evaluate the performance of the model based on some
-   metric other than self.criterion. For instance, we can't get the model accuracy in a simple way. [DONE]
-   
 - Documentation missing.
 
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
