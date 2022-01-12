@@ -20,15 +20,25 @@ TODO:
    
 - Documentation missing.
 
+- train_X cannot be a dataset because train_X is tried to be cast to tensor.
+
+- The entire data is being sent to CUDA in the default dataset, instead of being batch-moved to CUDA. This is a
+  problem for large datasets that don't fit into GPU memory. For that purpose, the following code segment is recommended:
+    dataloader = DataLoader(
+        dataset,
+        num_workers=1,  <- speeds up data loading
+        pin_memory=True  <- speeds up moving data from CPU to GPU
+    )
+    for X, y in dataloader:
+        X = X.to('cuda', non_blocking=True)  <- If the next operation depends on X, there won’t be any speed advantage.
+        y = y.to('cuda', non_blocking=True)  <- If the next operation depends on y, there won’t be any speed advantage.
+
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
 - Allow direct read access from NeuralNetwork to History.
 
 - self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
   prediction from pretrained weights.
-  
-- Change history to keep session info separate from loss over epochs. For example keep an array of indices that show
-  on which epoch a new session starts. [DONE]
   
 - Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
   history track on the first fit call.

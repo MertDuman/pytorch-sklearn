@@ -289,7 +289,7 @@ class WeightCheckpoint(Callback):
         elif self.savepath is not None:
             return torch.load(self.savepath)
         else:
-            raise RuntimeError("There are no best_weights loaded in RAM or saved to disk.")
+            raise RuntimeError("There are no best_weights loaded in RAM or saved to disk.")  # TODO: Return None instead?
 
     def __init__(self, tracked, mode, savepath=None):
         super(WeightCheckpoint, self).__init__()
