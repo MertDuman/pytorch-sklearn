@@ -7,7 +7,7 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
 
-from pytorch_sklearn.utils import DefaultDataset
+from pytorch_sklearn.utils import DefaultDataset, CUDADataset
 from pytorch_sklearn.callbacks import CallbackManager
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
@@ -32,6 +32,10 @@ TODO:
     for X, y in dataloader:
         X = X.to('cuda', non_blocking=True)  <- If the next operation depends on X, there won’t be any speed advantage.
         y = y.to('cuda', non_blocking=True)  <- If the next operation depends on y, there won’t be any speed advantage.
+  [DONE]
+        
+- train_X and train_y are being sent to CUDA with the call self._to_tensor, AND they are being copied with the dataset.
+  Too much unnecessary memory usage. [DONE]
 
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
@@ -71,6 +75,7 @@ class NeuralNetwork:
         self._max_epochs = None
         self._batch_size = None
         self._use_cuda = None
+        self._fits_gpu = None
         self._device = None
         self._callbacks = None
         self._metrics = None
@@ -168,6 +173,7 @@ class NeuralNetwork:
         max_epochs=10,
         batch_size=32,
         use_cuda=True,
+        fits_gpu=False,
         callbacks=None,
         metrics=None
     ):
@@ -175,6 +181,10 @@ class NeuralNetwork:
         callbacks = [] if callbacks is None else callbacks
         metrics = {} if metrics is None else metrics
         device = "cuda" if use_cuda else "cpu"
+        if not use_cuda and fits_gpu:
+            fits_gpu = False
+            warnings.warn("Fits gpu is true, but not using CUDA.")
+
         if max_epochs == -1:
             max_epochs = float("inf")
             warnings.warn("max_epochs is set to -1. Make sure to pass an early stopping method.")
@@ -219,6 +229,8 @@ class NeuralNetwork:
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
         for self._batch, (self._batch_X, self._batch_y) in enumerate(data_loader, start=1):
+            self._batch_X = self._batch_X.to(self._device, non_blocking=True)
+            self._batch_y = self._batch_y.to(self._device, non_blocking=True)
             self.fit_batch(self._batch_X, self._batch_y)
         self._notify(f"on_{self._pass_type}_epoch_end")
 
@@ -232,12 +244,16 @@ class NeuralNetwork:
 
     def get_dataloader(self, X, y, batch_size, shuffle):
         dataset = self.get_dataset(X, y)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+        if self._fits_gpu:
+            return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
 
     def get_dataset(self, X, y):
         if isinstance(X, Dataset):
             return X
-        return DefaultDataset(X, y, device=self._device)
+        if self._fits_gpu:
+            return CUDADataset(X, y)
+        return DefaultDataset(X, y)
 
     def predict(self, test_X, decision_func=None, **decision_func_kw):
         #  Set predict class parameters
@@ -252,6 +268,7 @@ class NeuralNetwork:
             self._notify("on_predict_begin")
             self._pred_y = []
             for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
                 pred_y = self.forward(self._batch_X)
                 if self._decision_func is not None:
                     pred_y = self._decision_func(pred_y, **self._decision_func_kw)
@@ -273,6 +290,7 @@ class NeuralNetwork:
             self._notify("on_predict_proba_begin")
             self._proba = []
             for self._batch, (self._batch_X) in enumerate(self._predict_proba_loader, start=1):
+                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
                 self._proba.append(self.forward(self._batch_X))
             self._proba = torch.cat(self._proba)
             self._notify("on_predict_proba_end")
@@ -292,6 +310,8 @@ class NeuralNetwork:
             self._out = []
             self._score = []
             for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
+                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
+                self._batch_y = self._batch_y.to(self._device, non_blocking=True)
                 batch_out = self.forward(self._batch_X)
                 if self._score_func is None:
                     batch_loss = self.get_loss(batch_out, self._batch_y).item()
@@ -309,7 +329,7 @@ class NeuralNetwork:
                 getattr(callback, method_name)(self, **cb_kwargs)
 
     def _to_tensor(self, X):
-        return to_tensor(X, device=self._device, clone=False)
+        return to_tensor(X, clone=False)
 
     def _to_safe_tensor(self, X):
         return to_safe_tensor(X, clone=False)
