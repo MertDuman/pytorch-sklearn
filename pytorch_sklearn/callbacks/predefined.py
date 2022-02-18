@@ -76,9 +76,11 @@ class History(Callback):
         self._calculate_metrics(net)
 
     def _calculate_metrics(self, net):
+        batch_out = to_safe_tensor(net._batch_out)
+        batch_y = to_safe_tensor(net._batch_y)
         self.epoch_metrics[0] += net._batch_loss.item()
         for i, metric in enumerate(net._metrics.values(), start=1):
-            self.epoch_metrics[i] += metric(to_safe_tensor(net._batch_out), to_safe_tensor(net._batch_y))
+            self.epoch_metrics[i] += metric(batch_out, batch_y)
 
 
 class Verbose(Callback):
@@ -320,6 +322,17 @@ class WeightCheckpoint(Callback):
 
 
 class EarlyStopping(Callback):
+    """
+    Implements early stopping functionality to the added NeuralNetwork.
+    It will monitor the given metric as `monitor` and if that metric does not improve
+    `patience` times in a row, training will be stopped early.
+    """
+    def __init__(self, tracked: str, mode: str, patience: int = 20):
+        super(EarlyStopping, self).__init__()
+        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
+        self.patience = patience
+        self.current_patience = 0
+
     @property
     def tracked(self):
         return self._tally.recorded
@@ -335,17 +348,6 @@ class EarlyStopping(Callback):
     @property
     def best_weights(self):
         return self._tally.best_weights
-
-    """
-    Implements early stopping functionality to the added NeuralNetwork.
-    It will monitor the given metric as `monitor` and stop if that metric does not improve
-    `patience` times in a row, training will be stopped early.
-    """
-    def __init__(self, tracked: str, mode: str, patience: int = 20):
-        super(EarlyStopping, self).__init__()
-        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
-        self.patience = patience
-        self.current_patience = 0
 
     def on_train_epoch_end(self, net):
         if not net._validate:

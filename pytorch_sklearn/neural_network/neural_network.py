@@ -15,6 +15,9 @@ from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
 
 """
 TODO:
+- Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
+  option to calculate metrics for all of the data instead of per batch.
+
 - If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
    
@@ -22,24 +25,9 @@ TODO:
 
 - train_X cannot be a dataset because train_X is tried to be cast to tensor.
 
-- The entire data is being sent to CUDA in the default dataset, instead of being batch-moved to CUDA. This is a
-  problem for large datasets that don't fit into GPU memory. For that purpose, the following code segment is recommended:
-    dataloader = DataLoader(
-        dataset,
-        num_workers=1,  <- speeds up data loading
-        pin_memory=True  <- speeds up moving data from CPU to GPU
-    )
-    for X, y in dataloader:
-        X = X.to('cuda', non_blocking=True)  <- If the next operation depends on X, there won’t be any speed advantage.
-        y = y.to('cuda', non_blocking=True)  <- If the next operation depends on y, there won’t be any speed advantage.
-  [DONE]
-        
-- train_X and train_y are being sent to CUDA with the call self._to_tensor, AND they are being copied with the dataset.
-  Too much unnecessary memory usage. [DONE]
-
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
-- Allow direct read access from NeuralNetwork to History.
+- Allow direct read access from NeuralNetwork to History. [DONE]
 
 - self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
   prediction from pretrained weights.
@@ -53,6 +41,10 @@ class NeuralNetwork:
     @property
     def callbacks(self):
         return self.cbmanager.callbacks
+
+    @property
+    def history(self):
+        return self.cbmanager.history
 
     def __init__(self, module: torch.nn.Module, optimizer: _Optimizer, criterion: _Loss):
         # Base parameters
@@ -134,7 +126,7 @@ class NeuralNetwork:
         return self.criterion(y_pred, y_true)
 
     def zero_grad(self):
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
     def compute_grad(self, loss: torch.Tensor):
         loss.backward()
