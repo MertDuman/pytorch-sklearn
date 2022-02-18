@@ -115,7 +115,10 @@ class Verbose(Callback):
         self.end_time = 0
 
     def on_train_epoch_begin(self, net):
-        print(f"Epoch {net._epoch}/{net._max_epochs}")
+        if self.verbose == 0:
+            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\x1b[2k\r', flush=True)
+        else:
+            print(f"Epoch {net._epoch}/{net._max_epochs}")
         self.total_time = 0
 
     def on_val_epoch_begin(self, net):

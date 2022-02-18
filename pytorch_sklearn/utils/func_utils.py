@@ -61,4 +61,5 @@ def get_memory_loc(X):
         return X.__array_interface__['data'][0]
     if isinstance(X, torch.Tensor):
         return X.data_ptr()
-    raise TypeError("Cannot get memory location of this data type.")
+    return -1
+    # raise TypeError("Cannot get memory location of this data type.")

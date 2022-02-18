@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from func_utils import to_tensor
+from pytorch_sklearn.utils.func_utils import to_tensor
 
 
 class DefaultDataset(Dataset):
@@ -9,10 +9,9 @@ class DefaultDataset(Dataset):
     A simple dataset for convenience.
     """
     def __init__(self, X, y=None):
-        if not isinstance(X, torch.Tensor):
-            X = torch.tensor(X)
-        if y is not None and not isinstance(y, torch.Tensor):
-            y = torch.tensor(y)
+        X = to_tensor(X, clone=False)  # Convert to tensor if it is not already.
+        if y is not None:
+            y = to_tensor(y, clone=False)
 
         self.X = X
         self.y = y
@@ -35,14 +34,9 @@ class CUDADataset(Dataset):
     """
     def __init__(self, X, y=None):
         device = "cuda"
-        if not isinstance(X, torch.Tensor):
-            X = torch.tensor(X, device=device)
-        if y is not None and not isinstance(y, torch.Tensor):
-            y = torch.tensor(y, device=device)
-        if X.device != device:
-            X = X.to(device)
-        if y is not None and y.device != device:
-            y = y.to(device)
+        X = to_tensor(X, device=device, clone=False)
+        if y is not None:
+            y = to_tensor(y, device=device, clone=False)
 
         self.X = X
         self.y = y
