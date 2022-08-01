@@ -2,6 +2,7 @@ import pickle
 import copy
 import warnings
 
+import numpy
 import torch
 from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
@@ -10,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 from pytorch_sklearn.utils import DefaultDataset, CUDADataset
 from pytorch_sklearn.callbacks import CallbackManager
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
-from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
+from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
 
 
 """
@@ -23,29 +24,22 @@ TODO:
    
 - Documentation missing.
 
-- train_X cannot be a dataset because train_X is tried to be cast to tensor.
+- train_X cannot be a dataset because train_X is tried to be cast to tensor. [DONE]
 
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
 
-- Allow direct read access from NeuralNetwork to History. [DONE]
-
 - self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
-  prediction from pretrained weights.
+  prediction from pretrained weights. [DONE]
   
 - Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
   history track on the first fit call.
+  
+- Add option to return predict results as a generator, returning batch_size samples per iteration. This is required
+  if the dataset is too large to fit in memory.
 """
 
 
 class NeuralNetwork:
-    @property
-    def callbacks(self):
-        return self.cbmanager.callbacks
-
-    @property
-    def history(self):
-        return self.cbmanager.history
-
     def __init__(self, module: torch.nn.Module, optimizer: _Optimizer, criterion: _Loss):
         # Base parameters
         self.module = module  # SAVED
@@ -68,7 +62,6 @@ class NeuralNetwork:
         self._batch_size = None
         self._use_cuda = None
         self._fits_gpu = None
-        self._device = None
         self._callbacks = None
         self._metrics = None
 
@@ -83,6 +76,7 @@ class NeuralNetwork:
         self._num_batches = None
         self._train_loader = None
         self._val_loader = None
+        self._device = None
 
         # Predict function parameters
         self._test_X = None
@@ -117,6 +111,14 @@ class NeuralNetwork:
         self._batch = None
         self._batch_X = None
         self._batch_y = None
+
+    @property
+    def callbacks(self):
+        return self.cbmanager.callbacks
+
+    @property
+    def history(self):
+        return self.cbmanager.history
 
     # Model Training Core Functions
     def forward(self, X: torch.Tensor):
@@ -157,7 +159,7 @@ class NeuralNetwork:
     # Model Training Main Functions
     def fit(
         self,
-        train_X=None,
+        train_X,
         train_y=None,
         validate=False,
         val_X=None,
@@ -235,6 +237,8 @@ class NeuralNetwork:
         self._notify(f"on_{self._pass_type}_batch_end")
 
     def get_dataloader(self, X, y, batch_size, shuffle):
+        if isinstance(X, DataLoader):
+            return X
         dataset = self.get_dataset(X, y)
         if self._fits_gpu:
             return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
@@ -247,7 +251,30 @@ class NeuralNetwork:
             return CUDADataset(X, y)
         return DefaultDataset(X, y)
 
-    def predict(self, test_X, decision_func=None, **decision_func_kw):
+    def predict(
+        self,
+        test_X,
+        batch_size=None,
+        use_cuda=None,
+        fits_gpu=None,
+        decision_func=None,
+        **decision_func_kw
+    ):
+        # Handle None inputs.
+        batch_size = batch_size if batch_size is not None else self._batch_size
+        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
+        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
+
+        # These asserts will trigger if predict is called before calling fit and not passing these parameters.
+        assert batch_size is not None, "Batch size is not set."
+        assert use_cuda is not None, "Device is not set."
+        assert fits_gpu is not None, "fits_gpu is not set."
+
+        device = "cuda" if use_cuda else "cpu"
+        if not use_cuda and fits_gpu:
+            fits_gpu = False
+            warnings.warn("Fits gpu is true, but not using CUDA.")
+
         #  Set predict class parameters
         predict_params = locals().copy()
         set_properties_hidden(**predict_params)
@@ -256,6 +283,7 @@ class NeuralNetwork:
         self._predict_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
 
         with torch.no_grad():
+            self.module = self.module.to(self._device)
             self.test()
             self._notify("on_predict_begin")
             self._pred_y = []
@@ -269,7 +297,28 @@ class NeuralNetwork:
             self._notify("on_predict_end")
         return self._pred_y
 
-    def predict_proba(self, test_X):
+    def predict_proba(
+        self,
+        test_X,
+        batch_size=None,
+        use_cuda=None,
+        fits_gpu=None
+    ):
+        # Handle None inputs.
+        batch_size = batch_size if batch_size is not None else self._batch_size
+        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
+        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
+
+        # These asserts will trigger if predict_proba is called before calling fit and not passing these parameters.
+        assert batch_size is not None, "Batch size is not set."
+        assert use_cuda is not None, "Device is not set."
+        assert fits_gpu is not None, "fits_gpu is not set."
+
+        device = "cuda" if use_cuda else "cpu"
+        if not use_cuda and fits_gpu:
+            fits_gpu = False
+            warnings.warn("Fits gpu is true, but not using CUDA.")
+
         #  Set predict_proba class parameters
         proba_params = locals().copy()
         set_properties_hidden(**proba_params)
@@ -278,6 +327,7 @@ class NeuralNetwork:
         self._predict_proba_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
 
         with torch.no_grad():
+            self.module = self.module.to(self._device)
             self.test()
             self._notify("on_predict_proba_begin")
             self._proba = []
@@ -288,7 +338,31 @@ class NeuralNetwork:
             self._notify("on_predict_proba_end")
         return self._proba
 
-    def score(self, test_X, test_y, score_func=None, **score_func_kw):
+    def score(
+        self,
+        test_X,
+        test_y=None,
+        batch_size=None,
+        use_cuda=None,
+        fits_gpu=None,
+        score_func=None,
+        **score_func_kw
+    ):
+        # Handle None inputs.
+        batch_size = batch_size if batch_size is not None else self._batch_size
+        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
+        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
+
+        # These asserts will trigger if score is called before calling fit and not passing these parameters.
+        assert batch_size is not None, "Batch size is not set."
+        assert use_cuda is not None, "Device is not set."
+        assert fits_gpu is not None, "fits_gpu is not set."
+
+        device = "cuda" if use_cuda else "cpu"
+        if not use_cuda and fits_gpu:
+            fits_gpu = False
+            warnings.warn("Fits gpu is true, but not using CUDA.")
+
         #  Set score class parameters
         score_params = locals().copy()
         set_properties_hidden(**score_params)
@@ -298,6 +372,7 @@ class NeuralNetwork:
         self._score_loader = self.get_dataloader(self._test_X, self._test_y, self._batch_size, shuffle=False)
 
         with torch.no_grad():
+            self.module = self.module.to(self._device)
             self.test()
             self._out = []
             self._score = []
@@ -321,6 +396,10 @@ class NeuralNetwork:
                 getattr(callback, method_name)(self, **cb_kwargs)
 
     def _to_tensor(self, X):
+        if X is None or isinstance(X, (DataLoader, Dataset)):
+            return X
+        if numpy.ndim(X) == 0:  # Some type without a dimension.
+            return X
         return to_tensor(X, clone=False)
 
     def _to_safe_tensor(self, X):
@@ -354,13 +433,18 @@ class NeuralNetwork:
             "criterion_state": net.criterion.state_dict(),
             "cbmanager": net.cbmanager
         }
+        create_dirs(savepath)
         with open(savepath, "wb") as f:
-            pickle.dump(d, f)
+            torch.save(d, f)
+            # pickle.dump(d, f)
 
     @classmethod
     def load_class(cls, loadpath, module=None, optimizer=None, criterion=None):
         with open(loadpath, "rb") as f:
-            d = pickle.load(f)
+            if torch.cuda.is_available():
+                d = torch.load(f)
+            else:
+                d = torch.load(f, map_location=torch.device("cpu"))
 
         if module is not None:
             module.load_state_dict(d["module_state"])

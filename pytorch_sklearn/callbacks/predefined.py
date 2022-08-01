@@ -14,7 +14,7 @@ import os
 import time
 
 # LossPlot
-from IPython import get_ipython
+# IPython.get_ipython
 import matplotlib as mpl
 import sys
 import importlib
@@ -116,7 +116,7 @@ class Verbose(Callback):
 
     def on_train_epoch_begin(self, net):
         if self.verbose == 0:
-            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\x1b[2k\r', flush=True)
+            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\x1b[2k\r', flush=True)  # TODO: Bug, no newline
         else:
             print(f"Epoch {net._epoch}/{net._max_epochs}")
         self.total_time = 0
@@ -169,12 +169,13 @@ class LossPlot(Callback):
                  savename=None,
                  figure_kw=None):
         super(LossPlot, self).__init__()
+        self.get_ipython = __import__('IPython', globals(), locals(), ['get_ipython'], 0).get_ipython
 
         self.new_backend = new_backend
         self.old_backend = mpl.get_backend()
         self.pyplot_name = pyplot_name
         self.max_col = max_col
-        self.is_ipython = get_ipython() is not None
+        self.is_ipython = self.get_ipython() is not None
         self.block_on_finish = block_on_finish
         self.savefig = savefig
         self.savename = savename
@@ -267,7 +268,7 @@ class LossPlot(Callback):
         importlib.reload(sys.modules[self.pyplot_name])
 
     def switch_magic(self, backend):
-        get_ipython().run_line_magic("matplotlib", backend)
+        self.get_ipython().run_line_magic("matplotlib", backend)
 
 
 class WeightCheckpoint(Callback):

@@ -2,6 +2,13 @@ import numpy as np
 import torch
 
 
+def create_dirs(path):
+    import os
+    dirs = os.path.dirname(path)
+    if not os.path.exists(dirs):
+        os.makedirs(dirs)
+
+
 def to_numpy(X: torch.Tensor, clone=True):
     """
     Safely convert from PyTorch tensor to numpy.
