@@ -24,12 +24,7 @@ TODO:
    
 - Documentation missing.
 
-- train_X cannot be a dataset because train_X is tried to be cast to tensor. [DONE]
-
 - predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
-
-- self._batch_size, self._callbacks etc are None unless fit() is called. We need to define them to do
-  prediction from pretrained weights. [DONE]
   
 - Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
   history track on the first fit call.
@@ -80,6 +75,7 @@ class NeuralNetwork:
 
         # Predict function parameters
         self._test_X = None
+        self._use_generator = None
         self._decision_func = None
         self._decision_func_kw = None
 
@@ -257,6 +253,7 @@ class NeuralNetwork:
         batch_size=None,
         use_cuda=None,
         fits_gpu=None,
+        use_generator=False,
         decision_func=None,
         **decision_func_kw
     ):
@@ -374,7 +371,7 @@ class NeuralNetwork:
         with torch.no_grad():
             self.module = self.module.to(self._device)
             self.test()
-            self._out = []
+            # self._out = []
             self._score = []
             for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
@@ -384,9 +381,9 @@ class NeuralNetwork:
                     batch_loss = self.get_loss(batch_out, self._batch_y).item()
                 else:
                     batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), **self._score_func_kw)
-                self._out.append(batch_out)
+                # self._out.append(batch_out)
                 self._score.append(batch_loss)
-            self._out = torch.cat(self._out)
+            # self._out = torch.cat(self._out)
             self._score = torch.Tensor(self._score).mean()
         return self._score
 

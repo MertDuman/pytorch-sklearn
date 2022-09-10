@@ -116,7 +116,7 @@ class Verbose(Callback):
 
     def on_train_epoch_begin(self, net):
         if self.verbose == 0:
-            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\x1b[2k\r', flush=True)  # TODO: Bug, no newline
+            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline
         else:
             print(f"Epoch {net._epoch}/{net._max_epochs}")
         self.total_time = 0
@@ -376,6 +376,23 @@ class EarlyStopping(Callback):
             self.current_patience += 1
             if self.current_patience >= self.patience:
                 net.keep_training = False
+
+
+class LRScheduler(Callback):
+    """
+    Applies the given learning rate scheduler at the end of each epoch.
+    """
+    def __init__(self, lr_scheduler):
+        super().__init__()
+        self._lr_scheduler = lr_scheduler
+
+    def on_train_epoch_end(self, net):
+        if not net._validate:
+            self._lr_scheduler.step()
+
+    def on_val_epoch_end(self, net):
+        if net._validate:
+            self._lr_scheduler.step()
 
 
 class Tracker(Callback):
