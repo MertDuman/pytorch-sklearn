@@ -32,23 +32,19 @@ class History(Callback):
         self.num_metrics = -1
         self.session = -1
 
-    def init_training(self, net):
-        self.track["train_loss"] = []
+    def init_track(self, net, pass_type):
+        if f"{pass_type}_loss" not in self.track:
+            self.track[f"{pass_type}_loss"] = []
         for name in net._metrics.keys():
-            self.track[f"train_{name}"] = []
-
-    def init_validation(self, net):
-        self.track["val_loss"] = []
-        for name in net._metrics.keys():
-            self.track[f"val_{name}"] = []
+            if f"{pass_type}_{name}" not in self.track:
+                self.track[f"{pass_type}_{name}"] = []
 
     def on_fit_begin(self, net):
         self.session += 1
         self.num_metrics = len(net._metrics) + 1
-        if self.session == 0:
-            self.init_training(net)
-            if net._validate:
-                self.init_validation(net)
+        self.init_track(net, "train")
+        if net._validate:
+            self.init_track(net, "val")
         self.sessions.append(len(self.track["train_loss"]) + 1)  # new session starts at epoch = len(train_loss) + 1
 
     def on_train_epoch_begin(self, net):
@@ -382,17 +378,46 @@ class LRScheduler(Callback):
     """
     Applies the given learning rate scheduler at the end of each epoch.
     """
-    def __init__(self, lr_scheduler):
+    def __init__(self, lr_scheduler, per_epoch=True, store_lrs=False, reset_on_fit_end=True, scheduler_kwargs=None):
         super().__init__()
-        self._lr_scheduler = lr_scheduler
+        self.lr_scheduler = lr_scheduler
+        self.init_state_dict = lr_scheduler.state_dict()
+        self.per_epoch = per_epoch
+        self.store_lrs = store_lrs
+        self.reset_on_fit_end = reset_on_fit_end
+        self.scheduler_kwargs = {} if scheduler_kwargs is None else scheduler_kwargs
+        self.lrs = []
+        if store_lrs:
+            try:
+                self.lrs.append(lr_scheduler.get_last_lr())
+            except AttributeError:
+                pass
+
+    def on_train_batch_end(self, net):
+        if not net._validate and not self.per_epoch:
+            self.step_and_store_lr()
+
+    def on_val_batch_end(self, net):
+        if net._validate and not self.per_epoch:
+            self.step_and_store_lr()
 
     def on_train_epoch_end(self, net):
-        if not net._validate:
-            self._lr_scheduler.step()
+        if not net._validate and self.per_epoch:
+            self.step_and_store_lr()
 
     def on_val_epoch_end(self, net):
-        if net._validate:
-            self._lr_scheduler.step()
+        if net._validate and self.per_epoch:
+            self.step_and_store_lr()
+
+    def on_fit_end(self, net):
+        if self.reset_on_fit_end:
+            self.lr_scheduler.load_state_dict(self.init_state_dict)
+
+    def step_and_store_lr(self):
+        self.lr_scheduler.step(**self.scheduler_kwargs)
+        if self.store_lrs:
+            self.lrs.append(self.lr_scheduler.get_last_lr())
+
 
 
 class Tracker(Callback):

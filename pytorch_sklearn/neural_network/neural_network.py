@@ -31,6 +31,8 @@ TODO:
   
 - Add option to return predict results as a generator, returning batch_size samples per iteration. This is required
   if the dataset is too large to fit in memory.
+  
+- Add LR Scheduler callback. [DONE]
 """
 
 
