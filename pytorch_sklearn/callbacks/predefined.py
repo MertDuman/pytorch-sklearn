@@ -1,5 +1,8 @@
+# __all__ = ["History", "Verbose", "EarlyStopping", "LossPlot", "WeightCheckpoint", "LRScheduler", "Tracker", "CallbackInfo"]
+
 from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.utils.func_utils import to_safe_tensor
+from pytorch_sklearn.callbacks.utils import Tally
 
 import torch
 
@@ -19,6 +22,7 @@ import matplotlib as mpl
 import sys
 import importlib
 
+# Custom
 from progress_bar import print_progress
 
 
@@ -376,48 +380,100 @@ class EarlyStopping(Callback):
 
 class LRScheduler(Callback):
     """
-    Applies the given learning rate scheduler at the end of each epoch.
+    Applies the given learning rate scheduler at the end of each epoch or batch.
+
+    Parameters
+    ----------
+    lr_scheduler
+        Scheduler to step.
+    per_epoch : bool
+        Whether we should step the scheduler every epoch or every batch.
+    store_lrs : bool
+        Keep track of all the learning rates.
+    reset_on_fit_end : bool
+        Does scheduler go to its initial state when fit ends?
+    interval : int or 2-element array_like
+        Steps when this scheduler is active, left-side inclusive, right-side exclusive, like [2, 5).
+        This first step is step 0. By default, the interval is [0, -1), meaning it is always active.
+
+        E.g. if interval is [2, 5) on a LinearLR scheduler going from 1 to 0 over 3 steps:
+            step 0: no update,  lr = 1
+            step 1: no update,  lr = 1
+            step 2: update,     lr = 0.666
+            step 3: update,     lr = 0.333
+            step 4: update,     lr = 0.000
+            step 5: no update,  lr = 0
+
+        If int, it is the same as passing [0, interval).
+    pass_metric : str, default: None
+        Name of the metric to pass down to the scheduler on step, e.g. train_loss.
     """
-    def __init__(self, lr_scheduler, per_epoch=True, store_lrs=False, reset_on_fit_end=True, scheduler_kwargs=None):
+    def __init__(self, lr_scheduler, per_epoch=True, store_lrs=False, reset_on_fit_end=True, reset_on_epoch_end=False, interval=None, pass_metric=None):
         super().__init__()
         self.lr_scheduler = lr_scheduler
         self.init_state_dict = lr_scheduler.state_dict()
         self.per_epoch = per_epoch
         self.store_lrs = store_lrs
         self.reset_on_fit_end = reset_on_fit_end
-        self.scheduler_kwargs = {} if scheduler_kwargs is None else scheduler_kwargs
+        self.reset_on_epoch_end = reset_on_epoch_end
+        self.interval = self._correct_interval(interval)
+        self.pass_metric = pass_metric
+
+        self.step_count = 0
         self.lrs = []
         if store_lrs:
             try:
                 self.lrs.append(lr_scheduler.get_last_lr())
             except AttributeError:
+                self.lrs.append(self.lr_scheduler._last_lr)
+                # Some bug with SequentialLR not having get_last_lr available before calling step.
+                # Should be fixed in torch 1.12.1
                 pass
 
     def on_train_batch_end(self, net):
-        if not net._validate and not self.per_epoch:
-            self.step_and_store_lr()
-
-    def on_val_batch_end(self, net):
-        if net._validate and not self.per_epoch:
-            self.step_and_store_lr()
+        if not self.per_epoch:
+            metric = net.history.track.get(self.pass_metric, [None])[-1]
+            self.step_and_store_lr(metric)
 
     def on_train_epoch_end(self, net):
-        if not net._validate and self.per_epoch:
-            self.step_and_store_lr()
+        if self.per_epoch:
+            metric = net.history.track.get(self.pass_metric, [None])[-1]
+            self.step_and_store_lr(metric)
 
-    def on_val_epoch_end(self, net):
-        if net._validate and self.per_epoch:
-            self.step_and_store_lr()
+        if self.reset_on_epoch_end:
+            self.lr_scheduler.load_state_dict(self.init_state_dict)
+            self.step_count = 0
 
     def on_fit_end(self, net):
         if self.reset_on_fit_end:
             self.lr_scheduler.load_state_dict(self.init_state_dict)
+            self.step_count = 0
 
-    def step_and_store_lr(self):
-        self.lr_scheduler.step(**self.scheduler_kwargs)
-        if self.store_lrs:
-            self.lrs.append(self.lr_scheduler.get_last_lr())
+    def step_and_store_lr(self, metric=None):
+        if self.should_step():
+            self.lr_scheduler.step(metric)
+            if self.store_lrs:
+                # For some reason ReduceLROnPlateau is not a _LRScheduler, so it doesn't have get_last_lr()
+                try:
+                    self.lrs.append(self.lr_scheduler.get_last_lr())
+                except AttributeError:
+                    self.lrs.append(self.lr_scheduler._last_lr)
 
+        self.step_count += 1
+
+    def should_step(self):
+        if self.interval[0] <= self.step_count < self.interval[1]:
+            return True
+        return False
+
+    def _correct_interval(self, interval):
+        if interval is None:
+            interval = [0, float("inf")]
+        elif isinstance(interval, int):
+            interval = [0, interval]
+        elif interval[1] == -1:
+            interval[1] = float("inf")
+        return interval
 
 
 class Tracker(Callback):
@@ -451,31 +507,6 @@ class Tracker(Callback):
     def _track(self, net):
         track = net.cbmanager.history.track
         self._tally.evaluate_record(track[self._tally.recorded][-1], best_epoch=net._epoch)
-
-
-class Tally:
-    """
-    Tally a given record's best state.
-    """
-    def __init__(self, recorded: str, mode: str, **kwargs):
-        self.__dict__.update(kwargs)
-        self.recorded = recorded
-        self.mode = mode
-        self.best_record = -np.Inf if mode == "max" else np.Inf
-
-    def is_better_record(self, new_record):
-        if self.mode == "max":
-            return new_record > self.best_record
-        return new_record < self.best_record
-
-    def evaluate_record(self, new_record, **kwargs):
-        """
-        Check if ``new_metric`` is better than ``self.best_metric``.
-        If it is, update this class's properties with ``**kwargs``.
-        """
-        if self.is_better_record(new_record):
-            self.best_record = new_record
-            self.__dict__.update(**kwargs)
 
 
 class CallbackInfo(Callback):
