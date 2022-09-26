@@ -27,7 +27,7 @@ class OptimizerGroupFilter(Optimizer):
 
     Currently, PyTorch has no way of specifying which parameter groups a learning rate schedulers should update.
     While some learning rate schedulers allow multiple parameter groups to be updated with different scalars, not all of them do,
-    and even then this is not the same thing is as NOT updating those groups.
+    and even then this is not the same thing as NOT updating those groups.
     Another solution to this would be to use different optimizers instead of different parameter groups, but this is not easily scalable.
     """
     def __init__(self, optimizer, groups=None):
@@ -56,6 +56,38 @@ class OptimizerGroupFilter(Optimizer):
 
     def step(self, *args, **kwargs):
         return self._optimizer.step(*args, **kwargs)
+
+    def __setattr__(self, key, value):
+        """ Stops PyTorch's _LRScheduler from reassigning the step function of optimizers, just to throw a warning for users..... """
+        if key == "step":
+            pass
+        else:
+            super().__setattr__(key, value)
+
+    @property
+    def _step_count(self):
+        """ Yet another workaround for PyTorch's _LRScheduler. Uses _step_count to throw a warning. This just bypasses it and returns 1 every time. """
+        return 1
+
+    @_step_count.setter
+    def _step_count(self, v):
+        """ Yet another workaround for PyTorch's _LRScheduler. Uses _step_count to throw a warning. This just bypasses it and returns 1 every time. """
+        pass
+
+    @property
+    def state(self):
+        return self.state_dict()
+
+    def state_dict(self):
+        """ For torch save related stuff. """
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
+
+    # def __getstate__(self):
+    #     """ For pickle. """
+    #     return {'state': self.state}
 
 
 class Tally:
@@ -87,11 +119,64 @@ class DynamicLRScheduler(object):
     from enum import Enum
 
     class Trend(Enum):
-        NONE = 0,
-        OSCILLATING = 1,
-        PLATEAU = 2,
+        NONE = 0
+        OSCILLATING = 1
+        PLATEAU = 2
         LINEAR = 3
 
+    """
+    Adjusts the learning rate based on trends of the given metric:
+        1. Oscillating:
+            Reduce LR
+        2. Linear:
+            Increase LR
+        3. Plateau:
+            Target Not Set:
+                Reduce LR
+            Target Set:
+                Target Not Reached:
+                    Follow Plateau Strategy
+                Target Reached:
+                    Target 2 Set:
+                        Target 2 Reached:
+                            Reduce LR to target2_lr
+                        Target 2 Not Reached:
+                            Reduce LR to min_lr
+                    Target 2 Not Set:
+                        Reduce LR to min_lr
+                        
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        Determines the parameters to be adjusted.
+    mode : str, ["min", "max"]
+        Whether the given metric is minimized or maximized.
+    down_factor : float
+        A value to multiply the LR when reducing it.
+    up_factor : float   
+        A value to multiply the LR when increasing it.
+    target : float, optional
+        The given metric tries to approach target. This scheduler does different LR adjustments based on distance to target.
+    target_close_thresh : float
+        How we decide we are close enough to the target.
+    target_distance : str or callable
+        How we calculate distance to target. If linear, then abs(current - target). If callable, signature expects (current, target).
+    target2 : float, optional
+        Used as a way to fine tune the model. Use case would be, for example:
+            target = 35 (dB PSNR), min_lr = 0.005
+            target2 = 39 (dB PSNR) target2_lr = 0.0001
+        When the metric reaches 35, we start lowering the LR to 0.005 on plateau. Then we train with this LR until we reach 39,
+        after which we lower the LR to 0.0001, allowing the model to fine tune.
+    target2_close_thresh : float
+        How we decide we are close enough to the target2.
+    target2_lr : float
+        Check target2 description.
+    plateau_strategy : str
+        What strategy to follow on plateau when away from target. Possible options are:
+            up: Increases the learning rate by up_factor.
+            cos: Cosine anneals the learning rate between initial lr and max_lr.
+            random: Randomly selects a lr between initial lr and max_lr. A high cooldown is preferred for this.
+    """
     def __init__(self,
                  optimizer,
                  mode='min',
@@ -100,11 +185,15 @@ class DynamicLRScheduler(object):
                  target=None,
                  target_close_thresh=0,
                  target_distance="linear",
-                 plateau_after=10,
-                 threshold=1e-4,
-                 threshold_mode='rel',
+                 # Not used yet
+                 target2=None,
+                 target2_close_thresh=0,
+                 target2_lr=None,
+                 #
+                 plateau_strategy="up",
+                 cosine_params=None,
                  cooldown=0,
-                 displacement_samples=10,
+                 relevant_samples=10,
                  deciding_samples=3,
                  oscillation_thresh=0.008,
                  avg_step_thresh=0.01,
@@ -112,8 +201,9 @@ class DynamicLRScheduler(object):
                  slope_thresh=0.0001,
                  min_lr=0,
                  max_lr=None,
+                 separate_cooldowns=False,
                  eps=1e-8,
-                 verbose=False
+                 verbose=False,
                  ):
         from collections import defaultdict
 
@@ -125,9 +215,6 @@ class DynamicLRScheduler(object):
 
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
-
-        if threshold_mode not in {'rel', 'abs'}:
-            raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
 
         if not np.isscalar(min_lr) and hasattr(min_lr, "__len__"):
             if len(min_lr) != len(optimizer.param_groups):
@@ -143,6 +230,12 @@ class DynamicLRScheduler(object):
         else:
             self.max_lrs = [max_lr] * len(optimizer.param_groups)
 
+        if plateau_strategy == "cos":
+            if not isinstance(cosine_params, dict):
+                raise ValueError(f"Using cosine plateau strategy. Pass dict of parameters for torch.optim.lr_scheduler.CosineAnnealingWarmRestarts (cosine_params).")
+            elif isinstance(cosine_params, dict) and "T_0" not in cosine_params:
+                raise ValueError(f"T_0 must be present for cosine parameters.")
+
         self.optimizer = optimizer
         self.mode = mode
         self.down_factor = down_factor
@@ -150,29 +243,34 @@ class DynamicLRScheduler(object):
         self.target = target
         self.target_close_thresh = target_close_thresh
         self.target_distance = target_distance
-        self.plateau_after = plateau_after
-        self.threshold = threshold
-        self.threshold_mode = threshold_mode
+        self.target2 = target2
+        self.target2_close_thresh = target2_close_thresh
+        self.target2_lr = target2_lr
+        self.plateau_strategy = plateau_strategy
+        self.cosine_params = cosine_params
         self.cooldown = cooldown
-        self.displacement_samples = displacement_samples
+        self.relevant_samples = relevant_samples
         self.deciding_samples = deciding_samples
         self.oscillation_thresh = oscillation_thresh
         self.avg_step_thresh = avg_step_thresh
         self.cum_disp_thresh = cum_disp_thresh
         self.slope_thresh = slope_thresh
+        self.separate_cooldowns = separate_cooldowns
         self.eps = eps
         self.verbose = verbose
-
-        if self.mode == "min":
-            self.best = np.inf
-        elif self.mode == "max":
-            self.best = -np.inf
 
         self.metrics = []
         self.analysis = defaultdict(list)
         self.decisions = []
-        self.cooldown_counter = 0
-        self.num_bad_steps = 0
+
+        if self.plateau_strategy == "cos":
+            self.cos_anneal = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **cosine_params)
+
+        self.cooldown_counter = [0]
+        if self.separate_cooldowns:
+            self.cooldown_counter = [0] * len(self.Trend)
+
+        self.target_reached = False
         self.last_step = 0
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -182,48 +280,47 @@ class DynamicLRScheduler(object):
         self.metrics.append(current)
         self.last_step += 1
 
-        if len(self.metrics) >= self.displacement_samples:
+        if len(self.metrics) >= self.relevant_samples:
             self._analyze_metrics()
+            decision = self._make_decision()
 
-            if self.cooldown_counter > 0:
-                self.cooldown_counter -= 1
+            if self._on_cooldown(decision):
+                self._decrement_cooldown()
             else:
-                if self._try_update_lr(current):
-                    self.cooldown_counter = self.cooldown
+                if self._try_update_lr(current, decision):
+                    self._reset_cooldown(decision)
         else:
             self.decisions.append(self.Trend.NONE)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
-    def _try_update_lr(self, current):
-        # avg = np.mean(self.analysis["avg"][-self.deciding_samples:])
-        avg_abs = np.mean(self.analysis["avg_abs"][-self.deciding_samples:])
-        # cum = np.mean(self.analysis["cum"][-self.deciding_samples:])
-        avg_cum = np.mean(self.analysis["avg_cum"][-self.deciding_samples:])
-        std = np.mean(self.analysis["std"][-self.deciding_samples:])
-        slope = np.mean(self.analysis["slope"][-self.deciding_samples:])
+    def _on_cooldown(self, decision: Trend):
+        index = decision.value if self.separate_cooldowns else self.Trend.NONE.value
+        return self.cooldown_counter[index] > 0
 
-        did_update = False
+    def _decrement_cooldown(self):
+        for i in range(len(self.cooldown_counter)):
+            if self.cooldown_counter[i] > 0:
+                self.cooldown_counter[i] -= 1
 
-        if std > self.oscillation_thresh and avg_abs > self.avg_step_thresh:
-            self.decisions.append(self.Trend.OSCILLATING)
+    def _reset_cooldown(self, decision: Trend):
+        index = decision.value if self.separate_cooldowns else self.Trend.NONE.value
+        self.cooldown_counter[index] = self.cooldown
+
+    def _try_update_lr(self, current, decision):
+        if decision == self.Trend.OSCILLATING:
             self._update_lr(self.last_step, self.down_factor)
-            did_update = True
-        elif avg_abs < self.avg_step_thresh and np.abs(avg_cum) < self.cum_disp_thresh and np.abs(slope) < self.slope_thresh:
-            self.decisions.append(self.Trend.PLATEAU)
-            self._update_lr(self.last_step, self.down_factor)
-            did_update = True
-        elif avg_abs < self.avg_step_thresh and np.abs(avg_cum) > self.cum_disp_thresh and np.abs(slope) > self.slope_thresh:
-            self.decisions.append(self.Trend.LINEAR)
+        elif decision == self.Trend.PLATEAU:
             if self._is_target_close(current):
                 self._update_lr(self.last_step, self.down_factor)
             else:
-                self._update_lr(self.last_step, self.up_factor)
-            did_update = True
-        else:
-            self.decisions.append(self.Trend.NONE)
+                self._plateau_update_lr(self.last_step)
+        elif decision == self.Trend.LINEAR:
+            self._update_lr(self.last_step, self.up_factor)
+        elif decision == self.Trend.NONE:
+            pass
 
-        return did_update
+        return decision != self.Trend.NONE
 
     def _update_lr(self, step, factor):
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -232,10 +329,48 @@ class DynamicLRScheduler(object):
             if abs(old_lr - new_lr) > self.eps:
                 param_group['lr'] = new_lr
                 if self.verbose:
-                    print(f"Step {step}: updating learning rate of group {i} from {old_lr:.4e} to {new_lr:.4e}.")
+                    print(f"Step {step}: updating learning rate of group {i} from {old_lr:.6f} to {new_lr:.6f}.")
+
+    def _plateau_update_lr(self, step):
+        if self.plateau_strategy == "up":
+            self._update_lr(step, self.up_factor)
+        elif self.plateau_strategy == "cos":
+            self.cos_anneal.step()
+        elif self.plateau_strategy == "random":
+            for i, param_group in enumerate(self.optimizer.param_groups):
+                old_lr = float(param_group['lr'])
+                new_lr = np.random.rand() * (self.max_lrs[i] - self.optimizer.defaults["lr"]) + self.optimizer.defaults["lr"]
+                if abs(old_lr - new_lr) > self.eps:
+                    param_group['lr'] = new_lr
+                    if self.verbose:
+                        print(f"Step {step}: updating learning rate of group {i} from {old_lr:.6f} to {new_lr:.6f}.")
+        else:
+            raise NotImplementedError
+
+    def _make_decision(self):
+        # avg = np.mean(self.analysis["avg"][-self.deciding_samples:])
+        avg_abs = np.mean(self.analysis["avg_abs"][-self.deciding_samples:])
+        # cum = np.mean(self.analysis["cum"][-self.deciding_samples:])
+        avg_cum = np.mean(self.analysis["avg_cum"][-self.deciding_samples:])
+        std = np.mean(self.analysis["std"][-self.deciding_samples:])
+        slope = np.mean(self.analysis["slope"][-self.deciding_samples:])
+
+        decision = self.Trend.NONE
+
+        if std > self.oscillation_thresh and avg_abs > self.avg_step_thresh:
+            decision = self.Trend.OSCILLATING
+        elif avg_abs < self.avg_step_thresh and np.abs(avg_cum) < self.cum_disp_thresh and np.abs(slope) < self.slope_thresh:
+            decision = self.Trend.PLATEAU
+        elif avg_abs < self.avg_step_thresh and np.abs(avg_cum) > self.cum_disp_thresh and np.abs(slope) > self.slope_thresh:
+            decision = self.Trend.LINEAR
+        # SPIKE
+        # TODO: CosineWarmRestarts when Plateau, not just a simple LR increase.
+
+        self.decisions.append(decision)
+        return decision
 
     def _analyze_metrics(self):
-        metrics = np.array(self.metrics[-self.displacement_samples:])
+        metrics = np.array(self.metrics[-self.relevant_samples:])
         disp = np.diff(metrics)
 
         avg_disp = disp.mean()
@@ -255,6 +390,7 @@ class DynamicLRScheduler(object):
     def _is_target_close(self, current):
         distance = self._distance_to_target(current)
         if distance <= self.target_close_thresh:
+            self.target_reached = True
             return True
         return False
 
@@ -267,21 +403,6 @@ class DynamicLRScheduler(object):
 
         if self.target_distance == "linear":
             return np.abs(self.target - current)
-
-    def _is_better(self, current, best):
-        if self.mode == 'min' and self.threshold_mode == 'rel':
-            rel_epsilon = 1. - self.threshold
-            return current < best * rel_epsilon
-
-        elif self.mode == 'max' and self.threshold_mode == 'rel':
-            rel_epsilon = 1. + self.threshold
-            return current > best * rel_epsilon
-
-        elif self.mode == 'min' and self.threshold_mode == 'abs':
-            return current < best - self.threshold
-
-        elif self.mode == 'max' and self.threshold_mode == 'abs':
-            return current > best + self.threshold
 
     def get_last_lr(self):
         return self._last_lr

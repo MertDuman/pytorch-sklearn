@@ -33,15 +33,18 @@ class History(Callback):
         self.track = {}
         self.sessions = []
         self.epoch_metrics = None
+        self.key_index = {}  # given key in track, return index in epoch_metrics.
         self.num_metrics = -1
         self.session = -1
 
     def init_track(self, net, pass_type):
         if f"{pass_type}_loss" not in self.track:
             self.track[f"{pass_type}_loss"] = []
-        for name in net._metrics.keys():
+            self.key_index[f"{pass_type}_loss"] = 0
+        for i, name in enumerate(net._metrics.keys(), start=1):
             if f"{pass_type}_{name}" not in self.track:
                 self.track[f"{pass_type}_{name}"] = []
+                self.key_index[f"{pass_type}_{name}"] = i
 
     def on_fit_begin(self, net):
         self.session += 1
@@ -52,7 +55,7 @@ class History(Callback):
         self.sessions.append(len(self.track["train_loss"]) + 1)  # new session starts at epoch = len(train_loss) + 1
 
     def on_train_epoch_begin(self, net):
-        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics
+        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics, this is possible because dict keys are ordered in Python 3.7
 
     def on_val_epoch_begin(self, net):
         self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics
@@ -116,7 +119,7 @@ class Verbose(Callback):
 
     def on_train_epoch_begin(self, net):
         if self.verbose == 0:
-            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline
+            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline sometimes
         else:
             print(f"Epoch {net._epoch}/{net._max_epochs}")
         self.total_time = 0
@@ -297,10 +300,11 @@ class WeightCheckpoint(Callback):
         else:
             raise RuntimeError("There are no best_weights loaded in RAM or saved to disk.")  # TODO: Return None instead?
 
-    def __init__(self, tracked, mode, savepath=None):
+    def __init__(self, tracked, mode, savepath=None, save_per_epoch=False):
         super(WeightCheckpoint, self).__init__()
         self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
         self.savepath = savepath
+        self.save_per_epoch = save_per_epoch
 
     def on_train_epoch_end(self, net):
         if not net._validate:
@@ -316,13 +320,19 @@ class WeightCheckpoint(Callback):
         self._tally.evaluate_record(new_record=new_record,
                                     best_epoch=net._epoch,
                                     best_weights=copy.deepcopy(net.module.state_dict()))
+        if self.save_per_epoch:
+            self._save_weights(False)
 
     def on_fit_end(self, net):
+        self._save_weights(True)
+
+    def _save_weights(self, fit_end):
         if self.savepath is not None:
             if self._tally.best_weights is None:
                 self._tally.best_weights = self.best_weights  # This can happen if we train the net a second time.
             torch.save(self._tally.best_weights, self.savepath)
-            self._tally.best_weights = None  # No need to keep it in memory after saving.
+            if fit_end:
+                self._tally.best_weights = None  # No need to keep it in memory after saving.
 
 
 class EarlyStopping(Callback):
@@ -425,14 +435,20 @@ class LRScheduler(Callback):
             try:
                 self.lrs.append(lr_scheduler.get_last_lr())
             except AttributeError:
-                self.lrs.append(self.lr_scheduler._last_lr)
+                try:
+                    self.lrs.append(self.lr_scheduler._last_lr)
+                except AttributeError:
+                    pass
                 # Some bug with SequentialLR not having get_last_lr available before calling step.
                 # Should be fixed in torch 1.12.1
-                pass
+                # Another bug with ReduceLROnPlateau not being a _LRScheduler, so it doesn't have get_last_lr()
 
     def on_train_batch_end(self, net):
         if not self.per_epoch:
-            metric = net.history.track.get(self.pass_metric, [None])[-1]
+            metric_index = net.history.key_index.get(self.pass_metric, None)
+            metric = None
+            if metric_index is not None:
+                metric = net.history.epoch_metrics[metric_index] / net._batch  # batch mean if we update per batch!
             self.step_and_store_lr(metric)
 
     def on_train_epoch_end(self, net):

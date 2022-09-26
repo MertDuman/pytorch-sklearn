@@ -195,7 +195,7 @@ class NeuralNetwork:
         if self._validate:
             self._val_X = self._to_tensor(self._val_X)
             self._val_y = self._to_tensor(self._val_y)
-            self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=True)
+            self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=False)
 
         # Begin Fit
         self.module = self.module.to(self._device)
