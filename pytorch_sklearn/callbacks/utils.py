@@ -161,21 +161,14 @@ class DynamicLRScheduler(object):
         How we decide we are close enough to the target.
     target_distance : str or callable
         How we calculate distance to target. If linear, then abs(current - target). If callable, signature expects (current, target).
-    target2 : float, optional
-        Used as a way to fine tune the model. Use case would be, for example:
-            target = 35 (dB PSNR), min_lr = 0.005
-            target2 = 39 (dB PSNR) target2_lr = 0.0001
-        When the metric reaches 35, we start lowering the LR to 0.005 on plateau. Then we train with this LR until we reach 39,
-        after which we lower the LR to 0.0001, allowing the model to fine tune.
-    target2_close_thresh : float
-        How we decide we are close enough to the target2.
-    target2_lr : float
-        Check target2 description.
     plateau_strategy : str
         What strategy to follow on plateau when away from target. Possible options are:
             up: Increases the learning rate by up_factor.
             cos: Cosine anneals the learning rate between initial lr and max_lr.
             random: Randomly selects a lr between initial lr and max_lr. A high cooldown is preferred for this.
+    cosine_params : dict
+        Parameters for CosineAnnealingWarmRestarts. Additionally you can pass max_lr OR eta_max which would set the max lr of
+        CosineAnnealingWarmRestarts, otherwise max lr is set as the default lr of the optimizer.
     """
     def __init__(self,
                  optimizer,
@@ -183,13 +176,7 @@ class DynamicLRScheduler(object):
                  down_factor=1,
                  up_factor=1,
                  target=None,
-                 target_close_thresh=0,
                  target_distance="linear",
-                 # Not used yet
-                 target2=None,
-                 target2_close_thresh=0,
-                 target2_lr=None,
-                 #
                  plateau_strategy="up",
                  cosine_params=None,
                  cooldown=0,
@@ -241,11 +228,7 @@ class DynamicLRScheduler(object):
         self.down_factor = down_factor
         self.up_factor = up_factor
         self.target = target
-        self.target_close_thresh = target_close_thresh
         self.target_distance = target_distance
-        self.target2 = target2
-        self.target2_close_thresh = target2_close_thresh
-        self.target2_lr = target2_lr
         self.plateau_strategy = plateau_strategy
         self.cosine_params = cosine_params
         self.cooldown = cooldown
@@ -263,8 +246,12 @@ class DynamicLRScheduler(object):
         self.analysis = defaultdict(list)
         self.decisions = []
 
+        self.cos_anneal = None
         if self.plateau_strategy == "cos":
+            cos_max_lr = cosine_params.pop("max_lr", cosine_params.pop("eta_max", None))
             self.cos_anneal = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **cosine_params)
+            if cos_max_lr is not None:
+                self.cos_anneal.base_lrs = [cos_max_lr for _ in self.optimizer.param_groups]
 
         self.cooldown_counter = [0]
         if self.separate_cooldowns:
@@ -311,7 +298,7 @@ class DynamicLRScheduler(object):
         if decision == self.Trend.OSCILLATING:
             self._update_lr(self.last_step, self.down_factor)
         elif decision == self.Trend.PLATEAU:
-            if self._is_target_close(current):
+            if self._is_target_reached(current):
                 self._update_lr(self.last_step, self.down_factor)
             else:
                 self._plateau_update_lr(self.last_step)
@@ -364,7 +351,6 @@ class DynamicLRScheduler(object):
         elif avg_abs < self.avg_step_thresh and np.abs(avg_cum) > self.cum_disp_thresh and np.abs(slope) > self.slope_thresh:
             decision = self.Trend.LINEAR
         # SPIKE
-        # TODO: CosineWarmRestarts when Plateau, not just a simple LR increase.
 
         self.decisions.append(decision)
         return decision
@@ -387,22 +373,31 @@ class DynamicLRScheduler(object):
         self.analysis["std"].append(std_disp)
         self.analysis["slope"].append(slope)
 
-    def _is_target_close(self, current):
-        distance = self._distance_to_target(current)
-        if distance <= self.target_close_thresh:
-            self.target_reached = True
-            return True
+    def _is_target_reached(self, current):
+        distance = self._distance_to_target(current)  # target - current
+        if self.mode == "min":
+            # we are minimizing to get to target, distance is negative when target is not reached.
+            if distance < 0:
+                return False
+            else:
+                self.target_reached = True
+                return True
+        elif self.mode == "max":
+            # we are maximizing to get to target, distance is positive when target is not reached.
+            if distance > 0:
+                return False
+            else:
+                self.target_reached = True
+                return True
+
         return False
 
     def _distance_to_target(self, current):
         if self.target is None:
             return 0
 
-        if isinstance(self.target_distance, type(lambda x: x)):  # is function
-            return self.target_distance(current, self.target)
-
         if self.target_distance == "linear":
-            return np.abs(self.target - current)
+            return self.target - current
 
     def get_last_lr(self):
         return self._last_lr
