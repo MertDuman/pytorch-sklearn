@@ -164,10 +164,10 @@ class DynamicLRScheduler(object):
     plateau_strategy : str
         What strategy to follow on plateau when away from target. Possible options are:
             up: Increases the learning rate by up_factor.
-            cos: Cosine anneals the learning rate between initial lr and max_lr.
+            cos: Cosine anneals the learning rate between eta_max (or initial_lr) and eta_min.
             random: Randomly selects a lr between initial lr and max_lr. A high cooldown is preferred for this.
     cosine_params : dict
-        Parameters for CosineAnnealingWarmRestarts. Additionally you can pass max_lr OR eta_max which would set the max lr of
+        Parameters for CosineAnnealingWarmRestarts. Additionally you can pass eta_max which would set the max lr of
         CosineAnnealingWarmRestarts, otherwise max lr is set as the default lr of the optimizer.
     """
     def __init__(self,
@@ -177,18 +177,22 @@ class DynamicLRScheduler(object):
                  up_factor=1,
                  target=None,
                  target_distance="linear",
-                 plateau_strategy="up",
-                 cosine_params=None,
+                 min_lr=0,
+                 max_lr=None,
                  cooldown=0,
+                 separate_cooldowns=False,
+                 plateau_strategy="up",
+                 plateau_params=None,
+                 oscillation_strategy="down",
+                 oscillation_params=None,
+                 linear_strategy="up",
+                 linear_params=None,
                  relevant_samples=10,
                  deciding_samples=3,
                  oscillation_thresh=0.008,
                  avg_step_thresh=0.01,
                  cum_disp_thresh=0.015,
                  slope_thresh=0.0001,
-                 min_lr=0,
-                 max_lr=None,
-                 separate_cooldowns=False,
                  eps=1e-8,
                  verbose=False,
                  ):
@@ -218,9 +222,9 @@ class DynamicLRScheduler(object):
             self.max_lrs = [max_lr] * len(optimizer.param_groups)
 
         if plateau_strategy == "cos":
-            if not isinstance(cosine_params, dict):
+            if not isinstance(plateau_params, dict):
                 raise ValueError(f"Using cosine plateau strategy. Pass dict of parameters for torch.optim.lr_scheduler.CosineAnnealingWarmRestarts (cosine_params).")
-            elif isinstance(cosine_params, dict) and "T_0" not in cosine_params:
+            elif isinstance(plateau_params, dict) and "T_0" not in plateau_params:
                 raise ValueError(f"T_0 must be present for cosine parameters.")
 
         self.optimizer = optimizer
@@ -229,16 +233,22 @@ class DynamicLRScheduler(object):
         self.up_factor = up_factor
         self.target = target
         self.target_distance = target_distance
-        self.plateau_strategy = plateau_strategy
-        self.cosine_params = cosine_params
         self.cooldown = cooldown
+        self.separate_cooldowns = separate_cooldowns
+
+        self.plateau_strategy = plateau_strategy
+        self.plateau_params = plateau_params
+        self.oscillation_strategy = oscillation_strategy
+        self.oscillation_params = oscillation_params
+        self.linear_strategy = linear_strategy
+        self.linear_params = linear_params
+
         self.relevant_samples = relevant_samples
         self.deciding_samples = deciding_samples
         self.oscillation_thresh = oscillation_thresh
         self.avg_step_thresh = avg_step_thresh
         self.cum_disp_thresh = cum_disp_thresh
         self.slope_thresh = slope_thresh
-        self.separate_cooldowns = separate_cooldowns
         self.eps = eps
         self.verbose = verbose
 
@@ -246,12 +256,9 @@ class DynamicLRScheduler(object):
         self.analysis = defaultdict(list)
         self.decisions = []
 
-        self.cos_anneal = None
-        if self.plateau_strategy == "cos":
-            cos_max_lr = cosine_params.pop("max_lr", cosine_params.pop("eta_max", None))
-            self.cos_anneal = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **cosine_params)
-            if cos_max_lr is not None:
-                self.cos_anneal.base_lrs = [cos_max_lr for _ in self.optimizer.param_groups]
+        self._init_plateau_strategy()
+        self._init_oscillation_strategy()
+        self._init_linear_strategy()
 
         self.cooldown_counter = [0]
         if self.separate_cooldowns:
@@ -280,6 +287,21 @@ class DynamicLRScheduler(object):
             self.decisions.append(self.Trend.NONE)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+    def _init_plateau_strategy(self):
+        self.cos_anneal = None
+        if self.plateau_strategy == "cos":
+            plateau_params = self.plateau_params.copy()
+            cos_max_lr = plateau_params.pop("eta_max", None)
+            self.cos_anneal = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, **plateau_params)
+            if cos_max_lr is not None:
+                self.cos_anneal.base_lrs = [cos_max_lr for _ in self.optimizer.param_groups]
+
+    def _init_oscillation_strategy(self):
+        pass
+
+    def _init_linear_strategy(self):
+        pass
 
     def _on_cooldown(self, decision: Trend):
         index = decision.value if self.separate_cooldowns else self.Trend.NONE.value

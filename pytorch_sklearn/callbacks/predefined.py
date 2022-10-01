@@ -122,22 +122,17 @@ class Verbose(Callback):
             print(f"Epoch {net._epoch}/{net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline sometimes
         else:
             print(f"Epoch {net._epoch}/{net._max_epochs}")
-        self.total_time = 0
+
+        if self.verbose >= 4:
+            self.start_time = time.perf_counter()
 
     def on_val_epoch_begin(self, net):
-        self.total_time = 0
-
-    def on_train_batch_begin(self, net):
         if self.verbose >= 4:
             self.start_time = time.perf_counter()
 
     def on_train_batch_end(self, net):
         if self.verbose >= 1:
             self._print(net)
-
-    def on_val_batch_begin(self, net):
-        if self.verbose >= 4:
-            self.start_time = time.perf_counter()
 
     def on_val_batch_end(self, net):
         if self.verbose >= 1:
@@ -148,7 +143,7 @@ class Verbose(Callback):
         epoch_metrics = net.cbmanager.history.epoch_metrics / net._batch  # mean batch loss
         if self.verbose >= 4:
             self.end_time = time.perf_counter()
-            self.total_time += self.end_time - self.start_time
+            self.total_time = self.end_time - self.start_time
             self.rem_time = ((net._num_batches - net._batch) * self.total_time) / net._batch
 
         # Fill print data
