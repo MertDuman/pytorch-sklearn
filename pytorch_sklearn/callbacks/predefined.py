@@ -28,7 +28,7 @@ from progress_bar import print_progress
 
 class History(Callback):
     def __init__(self):
-        super(History, self).__init__()
+        super().__init__()
         self.name = "History"
         self.track = {}
         self.sessions = []
@@ -107,7 +107,7 @@ class Verbose(Callback):
                 3: Metrics
                 4: Total Time + ETA
         """
-        super(Verbose, self).__init__()
+        super().__init__()
         self.name = "Verbose"
         self.verbose = verbose
 
@@ -116,6 +116,9 @@ class Verbose(Callback):
         self.rem_time = 0
         self.start_time = 0
         self.end_time = 0
+
+    def state_dict(self):
+        return {}
 
     def on_train_epoch_begin(self, net):
         if self.verbose == 0:
@@ -184,6 +187,9 @@ class LossPlot(Callback):
         # on_fit_begin
         self.fig = None
         self.axes = None
+
+    def state_dict(self):
+        return {"fig": self.fig, "axes": self.axes}
 
     def on_fit_begin(self, net):
         self.switch_qt5()
@@ -270,6 +276,18 @@ class LossPlot(Callback):
 
 
 class WeightCheckpoint(Callback):
+    def __init__(self, tracked, mode, savepath=None, save_per_epoch=False):
+        super(WeightCheckpoint, self).__init__()
+        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
+        self.savepath = savepath
+        self.save_per_epoch = save_per_epoch
+
+    def state_dict(self):
+        return {"tally_state": self._tally.state_dict()}
+
+    def load_state_dict(self, state_dict: dict):
+        self._tally.load_state_dict(state_dict)
+
     @property
     def tracked(self):
         return self._tally.recorded
@@ -294,12 +312,6 @@ class WeightCheckpoint(Callback):
             return torch.load(self.savepath)
         else:
             raise RuntimeError("There are no best_weights loaded in RAM or saved to disk.")  # TODO: Return None instead?
-
-    def __init__(self, tracked, mode, savepath=None, save_per_epoch=False):
-        super(WeightCheckpoint, self).__init__()
-        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
-        self.savepath = savepath
-        self.save_per_epoch = save_per_epoch
 
     def on_train_epoch_end(self, net):
         if not net._validate:
@@ -341,6 +353,14 @@ class EarlyStopping(Callback):
         self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
         self.patience = patience
         self.current_patience = 0
+
+    def state_dict(self):
+        return {"tally_state": self._tally.state_dict(), "current_patience": self.current_patience}
+
+    def load_state_dict(self, state_dict: dict):
+        tally_state = state_dict.pop("tally_state")
+        self.__dict__.update(state_dict)
+        self._tally.load_state_dict(tally_state)
 
     @property
     def tracked(self):
@@ -441,6 +461,16 @@ class LRScheduler(Callback):
                 # Should be fixed in torch 1.12.1
                 # Another bug with ReduceLROnPlateau not being a _LRScheduler, so it doesn't have get_last_lr()
 
+    def state_dict(self):
+        d = {"step_count": self.step_count, "lrs": self.lrs}
+        d["lr_scheduler"] = self.lr_scheduler.state_dict()
+        return d
+
+    def load_state_dict(self, state_dict: dict):
+        lr_scheduler_state = state_dict.pop("lr_scheduler")
+        self.__dict__.update(state_dict)
+        self.lr_scheduler.load_state_dict(lr_scheduler_state)
+
     def on_train_batch_end(self, net):
         if not self.per_epoch:
             metric_index = net.history.key_index.get(self.pass_metric, None)
@@ -492,6 +522,19 @@ class LRScheduler(Callback):
 
 
 class Tracker(Callback):
+    """
+    Tracks the given metric as `tracked`.
+    """
+    def __init__(self, tracked: str, mode: str):
+        super(Tracker, self).__init__()
+        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1)
+
+    def state_dict(self):
+        return {"tally_state": self._tally.state_dict()}
+
+    def load_state_dict(self, state_dict):
+        self._tally.load_state_dict(state_dict["tally_state"])
+
     @property
     def tracked(self):
         return self._tally.recorded
@@ -503,13 +546,6 @@ class Tracker(Callback):
     @property
     def best_epoch(self):
         return self._tally.best_epoch
-
-    """
-    Tracks the given metric as `tracked`.
-    """
-    def __init__(self, tracked: str, mode: str):
-        super(Tracker, self).__init__()
-        self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1)
 
     def on_train_epoch_end(self, net):
         if not net._validate:
@@ -533,6 +569,9 @@ class CallbackInfo(Callback):
         self.name = "CallbackInfo"
         self.called = np.zeros(15, dtype=bool)
         self.parameters = {}
+
+    def state_dict(self):
+        return {}
 
     def on_fit_begin(self, net):
         if not self.called[0]:

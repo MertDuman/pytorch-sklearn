@@ -6,6 +6,13 @@ class Callback:
     def __init__(self):
         self.name = None  # provide an informative name
 
+    # Saving/Loading
+    def state_dict(self):
+        return self.__dict__
+
+    def load_state_dict(self, state_dict: dict):
+        self.__dict__.update(state_dict)
+
     # Fit
     def on_fit_begin(self, net):
         pass

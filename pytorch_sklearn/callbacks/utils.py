@@ -115,7 +115,7 @@ class OptimizerGroupFilter(Optimizer):
         pickle simply creates an empty instance using Class.__new__, and fills its __dict__ using __setstate__. 
         """
         warnings.warn("Saving the object directly is not recommended. Save and load the state_dict instead.")
-        return self.__dict__
+        return self.state_dict()
 
     def __setstate__(self, state: dict) -> None:
         """ 
@@ -135,6 +135,12 @@ class Tally:
         self.recorded = recorded
         self.mode = mode
         self.best_record = -np.Inf if mode == "max" else np.Inf
+
+    def state_dict(self):
+        return self.__dict__
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
 
     def is_better_record(self, new_record):
         if self.mode == "max":

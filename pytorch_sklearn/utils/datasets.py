@@ -9,12 +9,8 @@ class DefaultDataset(Dataset):
     A simple dataset for convenience.
     """
     def __init__(self, X, y=None):
-        X = to_tensor(X, clone=False)  # Convert to tensor if it is not already.
-        if y is not None:
-            y = to_tensor(y, clone=False)
-
-        self.X = X
-        self.y = y
+        self.X = to_tensor(X, clone=False)
+        self.y = y if y is None else to_tensor(y, clone=False)
         self.n = X.shape[0]
 
     def __len__(self):
@@ -23,8 +19,7 @@ class DefaultDataset(Dataset):
     def __getitem__(self, index):
         if self.y is None:
             return self.X[index, ...]
-        else:
-            return self.X[index, ...], self.y[index, ...]
+        return self.X[index, ...], self.y[index, ...]
 
 
 class CUDADataset(Dataset):

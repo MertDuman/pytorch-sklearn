@@ -10,9 +10,11 @@ from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
 
 from pytorch_sklearn.utils import DefaultDataset, CUDADataset
-from pytorch_sklearn.callbacks import CallbackManager
+from pytorch_sklearn.callbacks import CallbackManager, Callback
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
+
+from typing import Iterable
 
 
 """
@@ -237,20 +239,13 @@ class NeuralNetwork:
             self.backward(self._batch_loss)
         self._notify(f"on_{self._pass_type}_batch_end")
 
-    def get_dataloader(self, X, y, batch_size, shuffle):
+    def get_dataloader(self, X: torch.Tensor, y: Optional[torch.Tensor], shuffle):
         if isinstance(X, DataLoader):
             return X
-        dataset = self.get_dataset(X, y)
-        if self._fits_gpu:
-            return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
-
-    def get_dataset(self, X, y):
         if isinstance(X, Dataset):
-            return X
-        if self._fits_gpu:
-            return CUDADataset(X, y)
-        return DefaultDataset(X, y)
+            DataLoader(X, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
+        dataset = DefaultDataset(X, y)
+        return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
     def predict(
         self,
@@ -423,38 +418,45 @@ class NeuralNetwork:
             self._using_original = True
             self._original_state_dict = None
 
-    @classmethod
-    def save_class(cls, net, savepath):
-        d = {
+    def state_dict(self):
+        return {
             "module_state": net.module.state_dict(),
             "original_module_state": net._original_state_dict,
             "using_original": net._using_original,
             "optimizer_state": net.optimizer.state_dict(),
             "criterion_state": net.criterion.state_dict(),
-            "cbmanager": net.cbmanager
         }
+
+    def load_state_dict(self, state_dict):
+        self.module.load_state_dict(state_dict["module_state"])
+        self._original_state_dict = state_dict["original_module_state"]
+        self._using_original = state_dict["using_original"]
+        self.optimizer.load_state_dict(state_dict["optimizer_state"])
+        self.criterion.load_state_dict(state_dict["criterion_state"])
+
+    @classmethod
+    def save_class(cls, net: "NeuralNetwork", savepath: str):
+        d = {
+            "net_state": net.state_dict(),
+            "callbacks": []
+        }
+
+        for i, callback in enumerate(self.callbacks):
+            d["callbacks"].append(callback.state_dict())
+
         create_dirs(savepath)
         with open(savepath, "wb") as f:
             torch.save(d, f)
-            # pickle.dump(d, f)
 
     @classmethod
-    def load_class(cls, loadpath, module=None, optimizer=None, criterion=None):
+    def load_class(cls, net: "NeuralNetwork", callbacks: Iterable[Callback], loadpath: str):
         with open(loadpath, "rb") as f:
             if torch.cuda.is_available():
                 d = torch.load(f)
             else:
                 d = torch.load(f, map_location=torch.device("cpu"))
-
-        if module is not None:
-            module.load_state_dict(d["module_state"])
-        if optimizer is not None:
-            optimizer.load_state_dict(d["optimizer_state"])
-        if criterion is not None:
-            criterion.load_state_dict(d["criterion_state"])
-        net = NeuralNetwork(module, optimizer, criterion)
-        net.cbmanager = d["cbmanager"]
-        net._using_original = d["using_original"]
-        net._original_state_dict = d["original_module_state"]
-        return net
+        net.load_state_dict(d["net_state"])
+        net.cbmanager.callbacks = callbacks
+        for i, callback in enumerate(net.callbacks):
+            callback.load_state_dict(d["callbacks"][i])
 
