@@ -6,7 +6,7 @@ from torch.optim.optimizer import Optimizer as _Optimizer
 
 class L1L2NeuralNet(NeuralNetwork):
     def __init__(self, module: torch.nn.Module, optimizer: _Optimizer, criterion: _Loss, lambda1: float, lambda2: float):
-        super(L1L2NeuralNet, self).__init__(module, optimizer, criterion)
+        super().__init__(module, optimizer, criterion)
         self.lambda1 = lambda1
         self.lambda2 = lambda2
 

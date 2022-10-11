@@ -393,6 +393,8 @@ class LRScheduler(Callback):
         Scheduler to step.
     per_epoch : bool
         Whether we should step the scheduler every epoch or every batch.
+    per_step : int
+        Update after this many steps, where a step is an epoch if per_epoch=True, or a batch if per_epoch=False.
     store_lrs : bool
         Keep track of all the learning rates.
     reset_on_fit_end : bool
@@ -413,11 +415,12 @@ class LRScheduler(Callback):
     pass_metric : str, default: None
         Name of the metric to pass down to the scheduler on step, e.g. train_loss.
     """
-    def __init__(self, lr_scheduler, per_epoch=True, store_lrs=False, reset_on_fit_end=True, reset_on_epoch_end=False, interval=None, pass_metric=None):
+    def __init__(self, lr_scheduler, per_epoch=True, per_step=None, store_lrs=False, reset_on_fit_end=True, reset_on_epoch_end=False, interval=None, pass_metric=None):
         super().__init__()
         self.lr_scheduler = lr_scheduler
         self.init_state_dict = lr_scheduler.state_dict()
         self.per_epoch = per_epoch
+        self.per_step = per_step
         self.store_lrs = store_lrs
         self.reset_on_fit_end = reset_on_fit_end
         self.reset_on_epoch_end = reset_on_epoch_end
@@ -473,7 +476,8 @@ class LRScheduler(Callback):
         self.step_count += 1
 
     def should_step(self):
-        if self.interval[0] <= self.step_count < self.interval[1]:
+        if self.interval[0] <= self.step_count < self.interval[1] and \
+            (self.per_step is None or self.step_count % self.per_step == 0):
             return True
         return False
 

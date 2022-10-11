@@ -40,7 +40,10 @@ class OptimizerGroupFilter(Optimizer):
 
     @property
     def param_groups(self):
-        return [group for i, group in enumerate(self._optimizer.param_groups) if i in self._groups]
+        try:
+            return [group for i, group in enumerate(self._optimizer.param_groups) if i in self._groups]
+        except AttributeError:
+            return []
 
     @param_groups.setter
     def param_groups(self, v):
@@ -76,18 +79,51 @@ class OptimizerGroupFilter(Optimizer):
 
     @property
     def state(self):
+        """ PyTorch optimizers call this, but it shouldn't be called for this class. """
         return self.state_dict()
 
     def state_dict(self):
-        """ For torch save related stuff. """
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+        """ 
+        For torch.save related stuff. Used as torch.save(ins.state_dict(), 'state.pth'). 
+
+        Instead of saving/loading the object directly, the state_dict should be saved/loaded instead. The difference is that,
+        in order to call state_dict or load_state_dict, the object must be instantiated, meaning __init__ was called sometime before.
+        This implies that one can omit large objects from state_dict, and request them in the __init__, and not worry about saving/loading those.
+
+        This is exactly how PyTorch does it. For instance, Optimizers have model parameters that are updated with backprop. These parameters are not
+        saved/loaded with state_dict, rather they are requested in __init__. It is the user's responsibility to save the model parameters separately and
+        provide it later.
+
+        This design ensures that your code does not unexpectedly crash after loading an object. If you solely used pickle (and __get/setstate__), after loading
+        an object things might crash because some variables are omitted in __get/setstate__ in order to save memory. As an example, lets say some helper class
+        called History points to a huge object called NeuralNetwork, and History just tracks the progress of NeuralNetwork. History has its internal state, but it
+        also has a pointer to NeuralNetwork. If you pickle saved History, it would save NeuralNetwork, which would be a huge file. If you omitted NeuralNetwork by
+        overriding __get/setstate__, then when you load History, it wouldn't have a pointer to NeuralNetwork, so your code will crash later in the future.
+        If you request a pointer to NeuralNetwork in the constructor, and use state_dict, load_state_dict, this issue will not happen.
+        """
+        return {key: value for key, value in self.__dict__.items() if key != '_optimizer'}
 
     def load_state_dict(self, state_dict):
+        """ For torch.save related stuff. Used as ins.load_state_dict(torch.load('state.pth')). """
         self.__dict__.update(state_dict)
 
-    # def __getstate__(self):
-    #     """ For pickle. """
-    #     return {'state': self.state}
+    def __getstate__(self):
+        """ 
+        For pickle. torch.save also calls this as it uses pickle. 
+        
+        __getstate__ and __setstate__ are special, as __init__ is not called on objects that are saved and loaded with pickle. 
+        pickle simply creates an empty instance using Class.__new__, and fills its __dict__ using __setstate__. 
+        """
+        warnings.warn("Saving the object directly is not recommended. Save and load the state_dict instead.")
+        return self.__dict__
+
+    def __setstate__(self, state: dict) -> None:
+        """ 
+        For pickle. torch.load also calls this as it uses pickle. 
+        
+        Usually one would call the super() here as well, but this class is NOT an Optimizer, it just inherits from it to bypass some type checks.
+        """
+        self.__dict__.update(state)
 
 
 class Tally:
@@ -488,6 +524,7 @@ class DynamicLRScheduler(object):
         return np.split(x, np.where(np.diff(x) != stepsize)[0] + 1)
 
     def state_dict(self):
+        """ These two actually don't matter. PyTorch calls __getstate__ internally using Pickle to get the state of objects. """
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
     def load_state_dict(self, state_dict):

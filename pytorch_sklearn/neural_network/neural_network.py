@@ -4,6 +4,7 @@ import warnings
 
 import numpy
 import torch
+import numpy as np
 from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
@@ -170,6 +171,8 @@ class NeuralNetwork:
         metrics=None
     ):
         # Handle None inputs.
+        # Assume cbmanager has callbacks. If not, then set as empty array.
+        callbacks = self.cbmanager._callbacks if callbacks is None else callbacks
         callbacks = [] if callbacks is None else callbacks
         metrics = {} if metrics is None else metrics
         device = "cuda" if use_cuda else "cpu"
@@ -373,7 +376,6 @@ class NeuralNetwork:
         with torch.no_grad():
             self.module = self.module.to(self._device)
             self.test()
-            # self._out = []
             self._score = []
             for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
@@ -383,10 +385,9 @@ class NeuralNetwork:
                     batch_loss = self.get_loss(batch_out, self._batch_y).item()
                 else:
                     batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), **self._score_func_kw)
-                # self._out.append(batch_out)
                 self._score.append(batch_loss)
-            # self._out = torch.cat(self._out)
-            self._score = torch.Tensor(self._score).mean()
+                
+            self._score = torch.tensor(np.stack(self._score)).float().mean(dim=0)
         return self._score
 
     def _notify(self, method_name, **cb_kwargs):
