@@ -3,6 +3,7 @@
 from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.utils.func_utils import to_safe_tensor
 from pytorch_sklearn.callbacks.utils import Tally
+import pytorch_sklearn as psk
 
 import torch
 
@@ -275,9 +276,27 @@ class LossPlot(Callback):
         self.get_ipython().run_line_magic("matplotlib", backend)
 
 
+class NetCheckpoint(Callback):
+    def __init__(self, savepath, per_epoch=1):
+        super().__init__()
+        self.savepath = savepath
+        self.per_epoch = per_epoch
+
+    def on_train_epoch_end(self, net):
+        if not net._validate and (net._epoch - 1) % self.per_epoch == 0:
+            psk.NeuralNetwork.save_class(net, self.savepath)
+
+    def on_val_epoch_end(self, net):
+        if net._validate and (net._epoch - 1) % self.per_epoch == 0:
+            psk.NeuralNetwork.save_class(net, self.savepath)
+
+    def on_fit_end(self, net: "psk.NeuralNetwork"):
+        psk.NeuralNetwork.save_class(net, self.savepath)
+
+
 class WeightCheckpoint(Callback):
     def __init__(self, tracked, mode, savepath=None, save_per_epoch=False):
-        super(WeightCheckpoint, self).__init__()
+        super().__init__()
         self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
         self.savepath = savepath
         self.save_per_epoch = save_per_epoch
@@ -414,7 +433,7 @@ class LRScheduler(Callback):
     per_epoch : bool
         Whether we should step the scheduler every epoch or every batch.
     per_step : int
-        Update after this many steps, where a step is an epoch if per_epoch=True, or a batch if per_epoch=False.
+        Call lr_scheduler.step after this many steps, where a step is an epoch if per_epoch=True, or a batch if per_epoch=False.
     store_lrs : bool
         Keep track of all the learning rates.
     reset_on_fit_end : bool

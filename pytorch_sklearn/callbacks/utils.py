@@ -109,12 +109,13 @@ class OptimizerGroupFilter(Optimizer):
 
     def __getstate__(self):
         """ 
-        For pickle. torch.save also calls this as it uses pickle. 
+        For pickle. torch.save also calls this as it uses pickle (but it shouldn't, because we should save the state_dict instead).
         
         __getstate__ and __setstate__ are special, as __init__ is not called on objects that are saved and loaded with pickle. 
         pickle simply creates an empty instance using Class.__new__, and fills its __dict__ using __setstate__. 
         """
-        warnings.warn("Saving the object directly is not recommended. Save and load the state_dict instead.")
+        # No need to show this warning, because PyTorch calls __getstate__ of Optimizer's by default.
+        # warnings.warn(f"{type(self).__name__}: Saving the object directly is not recommended. Save and load the state_dict instead.")
         return self.state_dict()
 
     def __setstate__(self, state: dict) -> None:
@@ -530,7 +531,6 @@ class DynamicLRScheduler(object):
         return np.split(x, np.where(np.diff(x) != stepsize)[0] + 1)
 
     def state_dict(self):
-        """ These two actually don't matter. PyTorch calls __getstate__ internally using Pickle to get the state of objects. """
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
     def load_state_dict(self, state_dict):

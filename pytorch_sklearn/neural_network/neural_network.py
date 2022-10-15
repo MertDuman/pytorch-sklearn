@@ -14,7 +14,7 @@ from pytorch_sklearn.callbacks import CallbackManager, Callback
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
 
-from typing import Iterable
+from typing import Iterable, Optional, Union
 
 
 """
@@ -66,8 +66,8 @@ class NeuralNetwork:
         self._metrics = None
 
         # Fit runtime parameters
-        self._epoch = None
-        self._batch = None
+        self._epoch = None  # SAVED
+        self._batch = None  # SAVED
         self._batch_X = None
         self._batch_y = None
         self._batch_out = None
@@ -196,11 +196,11 @@ class NeuralNetwork:
         # Define DataLoaders
         self._train_X = self._to_tensor(self._train_X)
         self._train_y = self._to_tensor(self._train_y)
-        self._train_loader = self.get_dataloader(self._train_X, self._train_y, self._batch_size, shuffle=True)
+        self._train_loader = self.get_dataloader(self._train_X, self._train_y, shuffle=True)
         if self._validate:
             self._val_X = self._to_tensor(self._val_X)
             self._val_y = self._to_tensor(self._val_y)
-            self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=False)
+            self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False)
 
         # Begin Fit
         self.module = self.module.to(self._device)
@@ -239,11 +239,11 @@ class NeuralNetwork:
             self.backward(self._batch_loss)
         self._notify(f"on_{self._pass_type}_batch_end")
 
-    def get_dataloader(self, X: torch.Tensor, y: Optional[torch.Tensor], shuffle):
+    def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
         if isinstance(X, DataLoader):
             return X
         if isinstance(X, Dataset):
-            DataLoader(X, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
+            return DataLoader(X, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
         dataset = DefaultDataset(X, y)
         return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
@@ -277,7 +277,7 @@ class NeuralNetwork:
         set_properties_hidden(**predict_params)
 
         self._test_X = self._to_tensor(self._test_X)
-        self._predict_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+        self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
             self.module = self.module.to(self._device)
@@ -321,7 +321,7 @@ class NeuralNetwork:
         set_properties_hidden(**proba_params)
 
         self._test_X = self._to_tensor(self._test_X)
-        self._predict_proba_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+        self._predict_proba_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
             self.module = self.module.to(self._device)
@@ -366,7 +366,7 @@ class NeuralNetwork:
 
         self._test_X = self._to_tensor(self._test_X)
         self._test_y = self._to_tensor(self._test_y)
-        self._score_loader = self.get_dataloader(self._test_X, self._test_y, self._batch_size, shuffle=False)
+        self._score_loader = self.get_dataloader(self._test_X, self._test_y, shuffle=False)
 
         with torch.no_grad():
             self.module = self.module.to(self._device)
@@ -418,13 +418,19 @@ class NeuralNetwork:
             self._using_original = True
             self._original_state_dict = None
 
+    def set_current_as_original_weights(self):
+        self._using_original = True
+        self._original_state_dict = None
+
     def state_dict(self):
         return {
-            "module_state": net.module.state_dict(),
-            "original_module_state": net._original_state_dict,
-            "using_original": net._using_original,
-            "optimizer_state": net.optimizer.state_dict(),
-            "criterion_state": net.criterion.state_dict(),
+            "module_state": self.module.state_dict(),
+            "original_module_state": self._original_state_dict,
+            "using_original": self._using_original,
+            "optimizer_state": self.optimizer.state_dict(),
+            "criterion_state": self.criterion.state_dict(),
+            "epoch": self._epoch,
+            "batch": self._batch
         }
 
     def load_state_dict(self, state_dict):
@@ -433,6 +439,8 @@ class NeuralNetwork:
         self._using_original = state_dict["using_original"]
         self.optimizer.load_state_dict(state_dict["optimizer_state"])
         self.criterion.load_state_dict(state_dict["criterion_state"])
+        self._epoch = state_dict["epoch"]
+        self._batch = state_dict["batch"]
 
     @classmethod
     def save_class(cls, net: "NeuralNetwork", savepath: str):
@@ -441,7 +449,7 @@ class NeuralNetwork:
             "callbacks": []
         }
 
-        for i, callback in enumerate(self.callbacks):
+        for i, callback in enumerate(net.callbacks):
             d["callbacks"].append(callback.state_dict())
 
         create_dirs(savepath)
@@ -459,4 +467,3 @@ class NeuralNetwork:
         net.cbmanager.callbacks = callbacks
         for i, callback in enumerate(net.callbacks):
             callback.load_state_dict(d["callbacks"][i])
-
