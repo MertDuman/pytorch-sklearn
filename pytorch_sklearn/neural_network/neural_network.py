@@ -80,22 +80,12 @@ class NeuralNetwork:
 
         # Predict function parameters
         self._test_X = None
-        self._use_generator = None
         self._decision_func = None
         self._decision_func_kw = None
 
         # Predict runtime parameters
         self._predict_loader = None
         self._pred_y = None
-        self._batch = None
-        self._batch_X = None
-
-        # Predict Proba function parameters
-        self._test_X = None
-
-        # Predict Proba runtime parameters
-        self._predict_proba_loader = None
-        self._proba = None
         self._batch = None
         self._batch_X = None
 
@@ -253,7 +243,6 @@ class NeuralNetwork:
         batch_size=None,
         use_cuda=None,
         fits_gpu=None,
-        use_generator=False,
         decision_func=None,
         **decision_func_kw
     ):
@@ -294,19 +283,21 @@ class NeuralNetwork:
             self._notify("on_predict_end")
         return self._pred_y
 
-    def predict_proba(
+    def predict_generator(
         self,
         test_X,
         batch_size=None,
         use_cuda=None,
-        fits_gpu=None
+        fits_gpu=None,
+        decision_func=None,
+        **decision_func_kw
     ):
         # Handle None inputs.
         batch_size = batch_size if batch_size is not None else self._batch_size
         use_cuda = use_cuda if use_cuda is not None else self._use_cuda
         fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
 
-        # These asserts will trigger if predict_proba is called before calling fit and not passing these parameters.
+        # These asserts will trigger if predict is called before calling fit and not passing these parameters.
         assert batch_size is not None, "Batch size is not set."
         assert use_cuda is not None, "Device is not set."
         assert fits_gpu is not None, "fits_gpu is not set."
@@ -316,24 +307,24 @@ class NeuralNetwork:
             fits_gpu = False
             warnings.warn("Fits gpu is true, but not using CUDA.")
 
-        #  Set predict_proba class parameters
-        proba_params = locals().copy()
-        set_properties_hidden(**proba_params)
+        #  Set predict class parameters
+        predict_params = locals().copy()
+        set_properties_hidden(**predict_params)
 
         self._test_X = self._to_tensor(self._test_X)
-        self._predict_proba_loader = self.get_dataloader(self._test_X, None, shuffle=False)
+        self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
             self.module = self.module.to(self._device)
             self.test()
-            self._notify("on_predict_proba_begin")
-            self._proba = []
-            for self._batch, (self._batch_X) in enumerate(self._predict_proba_loader, start=1):
+            self._notify("on_predict_begin")
+            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._proba.append(self.forward(self._batch_X))
-            self._proba = torch.cat(self._proba)
-            self._notify("on_predict_proba_end")
-        return self._proba
+                self._pred_y = self.forward(self._batch_X)
+                if self._decision_func is not None:
+                    self._pred_y = self._decision_func(self._pred_y, **self._decision_func_kw)
+                yield self._pred_y
+            self._notify("on_predict_end")
 
     def score(
         self,
