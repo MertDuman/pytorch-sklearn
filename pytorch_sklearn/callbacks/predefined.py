@@ -305,7 +305,7 @@ class WeightCheckpoint(Callback):
         return {"tally_state": self._tally.state_dict()}
 
     def load_state_dict(self, state_dict: dict):
-        self._tally.load_state_dict(state_dict)
+        self._tally.load_state_dict(state_dict["tally_state"])
 
     @property
     def tracked(self):
@@ -481,9 +481,11 @@ class LRScheduler(Callback):
                 # Another bug with ReduceLROnPlateau not being a _LRScheduler, so it doesn't have get_last_lr()
 
     def state_dict(self):
-        d = {"step_count": self.step_count, "lrs": self.lrs}
-        d["lr_scheduler"] = self.lr_scheduler.state_dict()
-        return d
+        return {
+            "step_count": self.step_count,
+            "lrs": self.lrs,
+            "lr_scheduler": self.lr_scheduler.state_dict()
+        }
 
     def load_state_dict(self, state_dict: dict):
         lr_scheduler_state = state_dict.pop("lr_scheduler")
