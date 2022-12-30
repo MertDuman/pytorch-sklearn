@@ -1,4 +1,3 @@
 torch
 numpy
-progress_bar
-list_utilities
+matplotlib

@@ -7,5 +7,5 @@ setup(
     description="Implements fit, predict and other useful ways of training with PyTorch.",
     author="Mert Duman",
     license="MIT",
-    install_requires=["torch", "numpy", "matplotlib", "progress_bar", "list_utilities"]
+    install_requires=["torch", "numpy", "matplotlib"]
 )

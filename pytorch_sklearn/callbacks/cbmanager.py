@@ -1,5 +1,5 @@
 from pytorch_sklearn.callbacks import Verbose, History, CallbackInfo
-from list_utilities import make_unique_fast
+from pytorch_sklearn.utils.list_utilities import make_unique_fast
 
 
 class CallbackManager:

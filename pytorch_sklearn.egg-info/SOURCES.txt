@@ -1,7 +1,6 @@
 README.txt
 setup.py
 pytorch_sklearn/__init__.py
-pytorch_sklearn/datasets.py
 pytorch_sklearn.egg-info/PKG-INFO
 pytorch_sklearn.egg-info/SOURCES.txt
 pytorch_sklearn.egg-info/dependency_links.txt
@@ -9,6 +8,14 @@ pytorch_sklearn.egg-info/requires.txt
 pytorch_sklearn.egg-info/top_level.txt
 pytorch_sklearn/callbacks/__init__.py
 pytorch_sklearn/callbacks/callback.py
+pytorch_sklearn/callbacks/cbmanager.py
 pytorch_sklearn/callbacks/predefined.py
+pytorch_sklearn/callbacks/utils.py
 pytorch_sklearn/neural_network/__init__.py
+pytorch_sklearn/neural_network/generative_network.py
 pytorch_sklearn/neural_network/neural_network.py
+pytorch_sklearn/neural_network/predefined.py
+pytorch_sklearn/utils/__init__.py
+pytorch_sklearn/utils/class_utils.py
+pytorch_sklearn/utils/datasets.py
+pytorch_sklearn/utils/func_utils.py

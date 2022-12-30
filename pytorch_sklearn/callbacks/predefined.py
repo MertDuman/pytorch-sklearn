@@ -24,7 +24,7 @@ import sys
 import importlib
 
 # Custom
-from progress_bar import print_progress
+from pytorch_sklearn.utils.progress_bar import print_progress
 
 
 class History(Callback):
