@@ -14,6 +14,9 @@ import copy
 # WeightCheckpoint
 import os
 
+# ImageOutputWriter
+from os.path import join as osj
+
 # Verbose
 import time
 
@@ -118,14 +121,21 @@ class Verbose(Callback):
         self.start_time = 0
         self.end_time = 0
 
+        # Previous epochs if this model has stopped and resumed training
+        self.prev_epochs = 0
+
     def state_dict(self):
         return {}
 
+    def on_fit_begin(self, net):
+        try: self.prev_epochs = len(net.history.track["train_loss"])
+        except: pass
+
     def on_train_epoch_begin(self, net):
         if self.verbose == 0:
-            print(f"Epoch {net._epoch}/{net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline sometimes
+            print(f"Epoch {self.prev_epochs + net._epoch}/{self.prev_epochs + net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline sometimes
         else:
-            print(f"Epoch {net._epoch}/{net._max_epochs}")
+            print(f"Epoch {self.prev_epochs + net._epoch}/{self.prev_epochs + net._max_epochs}")
 
         if self.verbose >= 4:
             self.start_time = time.perf_counter()
@@ -281,6 +291,12 @@ class NetCheckpoint(Callback):
         super().__init__()
         self.savepath = savepath
         self.per_epoch = per_epoch
+
+    def state_dict(self):
+        return {}
+
+    def load_state_dict(self, state_dict: dict):
+        pass
 
     def on_train_epoch_end(self, net):
         if not net._validate and (net._epoch - 1) % self.per_epoch == 0:
@@ -540,6 +556,84 @@ class LRScheduler(Callback):
         elif interval[1] == -1:
             interval[1] = float("inf")
         return interval
+
+
+class ImageOutputWriter(Callback):
+    """
+    Saves the batch input, output, and the ground truth as images every 'freq' batches.
+
+    Parameters
+    ----------
+    save_path
+        The folder to save in.
+    freq : int
+        Saves images every 'freq' batches.
+    num_saved : int
+        If there are too many images per batch, you can choose how many to save. None by default, which means save all the images.
+    start : int
+        The saved images are named as: "epoch_{poch}_batch_{batch}_{current:03d}.png". This variable determines the starting point of 'current'.
+    clamp01 : bool
+        Whether the images are clamp between 0 and 1 (applied before 'preprocess').
+    create_path : bool
+        Whether the given 'save_path' should be created by this class or not.
+    preprocess : callable(img) -> img
+        A callable that expects a PyTorch tensor of shape (C x H x W), detached and on CPU, and outputs the processed tensor of the same shape.
+    """
+    def __init__(self, save_path, freq, num_saved=None, start=0, clamp01=True, create_path=False, preprocess=None):
+        super().__init__()
+        self.save_path = save_path
+        self.freq = freq
+        self.num_saved = num_saved  # None means all the images in the batch
+        self.clamp01 = clamp01
+        self.current = start
+        self.create_path = create_path
+        self.preprocess = preprocess
+        if create_path:
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+
+    def identity(self, x):
+        return x
+
+    def on_train_batch_end(self, net):
+        if net._batch % self.freq == 0:
+            batch_out = to_safe_tensor(net._batch_out)
+            batch_X = to_safe_tensor(net._batch_X)
+            batch_y = to_safe_tensor(net._batch_y)
+
+            if self.clamp01:
+                batch_out = torch.clamp(batch_out, 0, 1)
+
+            for i, (img, X, y) in enumerate(zip(batch_out, batch_X, batch_y)):
+                if self.num_saved is not None and i >= self.num_saved:
+                    break
+                
+                if self.preprocess is not None:
+                    img = self.preprocess(img)
+                    X = self.preprocess(X)
+                    y = self.preprocess(y)
+
+                img = img.permute(1,2,0)
+                X = X.permute(1,2,0)
+                y = y.permute(1,2,0)
+
+                plt.figure(figsize=(20,5))
+                plt.subplot(1,3,1)
+                plt.imshow(X)
+                plt.xlabel(f"Input")
+                plt.xticks([]); plt.yticks([])
+                plt.subplot(1,3,2)
+                plt.imshow(img)
+                plt.xlabel(f"Output")
+                plt.xticks([]); plt.yticks([])
+                plt.subplot(1,3,3)
+                plt.imshow(y)
+                plt.xlabel(f"GT")
+                plt.xticks([]); plt.yticks([])
+                plt.savefig(osj(self.save_path, f"{self.current:04d}_epoch_{net._epoch}_batch_{net._batch}.png"), bbox_inches="tight")
+                plt.close()
+            
+                self.current += 1
 
 
 class Tracker(Callback):

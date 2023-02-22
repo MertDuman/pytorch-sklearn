@@ -53,6 +53,9 @@ def to_safe_tensor(X: torch.Tensor, clone=True):
         ``torch.Tensor.cpu`` will clone the object if it is in GPU, but won't if it is in CPU.
         ``clone`` allows this function to clone the input always.
     """
+    if isinstance(X, (list, tuple)):
+        return list(map(to_safe_tensor, X))
+
     old_memory = get_memory_loc(X)
     if X.requires_grad:
         X = X.detach()

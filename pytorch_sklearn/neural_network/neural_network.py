@@ -400,7 +400,10 @@ class NeuralNetwork:
     def load_weights_from_path(self, weight_path):
         if self._using_original:
             self._original_state_dict = copy.deepcopy(self.module.state_dict())
-        self.module.load_state_dict(torch.load(weight_path))
+        if torch.cuda.is_available():
+            self.module.load_state_dict(torch.load(weight_path))
+        else:
+            self.module.load_state_dict(torch.load(weight_path, map_location=torch.device("cpu")))
         self._using_original = False
 
     def load_original_weights(self):
@@ -457,4 +460,7 @@ class NeuralNetwork:
         net.load_state_dict(d["net_state"])
         net.cbmanager.callbacks = callbacks
         for i, callback in enumerate(net.callbacks):
-            callback.load_state_dict(d["callbacks"][i])
+            try:
+                callback.load_state_dict(d["callbacks"][i])
+            except:
+                print(f"Couldn't load state for callback {i}: {type(callback).__name__}")
