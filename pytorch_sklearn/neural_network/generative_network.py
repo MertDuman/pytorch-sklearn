@@ -7,7 +7,7 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
 
-from pytorch_sklearn.utils import DefaultDataset, CUDADataset
+from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
 from pytorch_sklearn.callbacks import CallbackManager
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
