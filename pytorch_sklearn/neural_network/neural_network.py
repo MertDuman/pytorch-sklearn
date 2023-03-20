@@ -19,23 +19,20 @@ from typing import Iterable, Optional, Union
 
 """
 TODO:
+- Documentation missing.
+
+- It is very difficult to override fit_epoch or fit_batch.
+
+- Dataloader is assumed to return a tuple of (X, y). This is not always the case.
+  
+- Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
+  history track on the first fit call.
+
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
 
 - If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
-   
-- Documentation missing.
-
-- predict_proba() is a misleading name, as the unmodified network output does not need to be probabilities.
-  
-- Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
-  history track on the first fit call.
-  
-- Add option to return predict results as a generator, returning batch_size samples per iteration. This is required
-  if the dataset is too large to fit in memory.
-  
-- Add LR Scheduler callback. [DONE]
 """
 
 
