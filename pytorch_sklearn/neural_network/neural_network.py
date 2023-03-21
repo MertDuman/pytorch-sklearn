@@ -20,10 +20,6 @@ from typing import Iterable, Optional, Union
 """
 TODO:
 - Documentation missing.
-
-- It is very difficult to override fit_epoch or fit_batch.
-
-- Dataloader is assumed to return a tuple of (X, y). This is not always the case.
   
 - Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
   history track on the first fit call.
@@ -67,6 +63,7 @@ class NeuralNetwork:
         self._batch = None  # SAVED
         self._batch_X = None
         self._batch_y = None
+        self._batch_args = None
         self._batch_out = None
         self._batch_loss = None
         self._pass_type = None
@@ -85,6 +82,7 @@ class NeuralNetwork:
         self._pred_y = None
         self._batch = None
         self._batch_X = None
+        self._batch_args = None
 
         # Score function parameters
         self._test_X = None
@@ -99,6 +97,7 @@ class NeuralNetwork:
         self._batch = None
         self._batch_X = None
         self._batch_y = None
+        self._batch_args = None
 
     @property
     def callbacks(self):
@@ -109,10 +108,12 @@ class NeuralNetwork:
         return self.cbmanager.history
 
     # Model Training Core Functions
-    def forward(self, X: torch.Tensor):
+    def forward(self, X: torch.Tensor, *args: Iterable):
+        ''' Simply perform forward pass through the model and return the batch output. '''
         return self.module(X)
 
-    def get_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor):
+    def get_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, *args: Iterable):
+        ''' Calculate and return a single loss for the given batch. '''
         return self.criterion(y_pred, y_true)
 
     def zero_grad(self):
@@ -209,14 +210,10 @@ class NeuralNetwork:
             self._epoch += 1
         self._notify("on_fit_end")
 
-    def unpack_dataloader(self, data_loader):
-        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
-        yield from data_loader
-
     def fit_epoch(self, data_loader):
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
-        for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_dataloader(data_loader), start=1):
+        for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_train_loader(data_loader), start=1):
             self._batch_X = self._batch_X.to(self._device, non_blocking=True)
             self._batch_y = self._batch_y.to(self._device, non_blocking=True)
             self._fit_batch_wrapper(self._batch_X, self._batch_y, *self._batch_args)
@@ -232,18 +229,9 @@ class NeuralNetwork:
                        
     def fit_batch(self, X, y, *args):
         ''' Compute and return the output and loss for a batch. '''
-        out = self.forward(X)
-        loss = self.get_loss(self._batch_out, y)
+        out = self.forward(X, *args)
+        loss = self.get_loss(out, y, *args)
         return out, loss
-
-    def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
-        ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''
-        if isinstance(X, DataLoader):
-            return X
-        if isinstance(X, Dataset):
-            return DataLoader(X, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
-        dataset = DefaultDataset(X, y)
-        return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
     def predict(
         self,
@@ -281,11 +269,11 @@ class NeuralNetwork:
             self.test()
             self._notify("on_predict_begin")
             self._pred_y = []
-            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+            for self._batch, (self._batch_X, *self._batch_args) in enumerate(self.unpack_predict_loader(self._predict_loader), start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                pred_y = self.forward(self._batch_X)
+                pred_y = self.forward(self._batch_X, *self._batch_args)
                 if self._decision_func is not None:
-                    pred_y = self._decision_func(pred_y, **self._decision_func_kw)
+                    pred_y = self._decision_func(pred_y, *self._batch_args, **self._decision_func_kw)
                 self._pred_y.append(pred_y)
             self._pred_y = torch.cat(self._pred_y)
             self._notify("on_predict_end")
@@ -326,11 +314,11 @@ class NeuralNetwork:
             self.module = self.module.to(self._device)
             self.test()
             self._notify("on_predict_begin")
-            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
+            for self._batch, (self._batch_X, *self._batch_args) in enumerate(self.unpack_predict_loader(self._predict_loader), start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._pred_y = self.forward(self._batch_X)
+                self._pred_y = self.forward(self._batch_X, *self._batch_args)
                 if self._decision_func is not None:
-                    self._pred_y = self._decision_func(self._pred_y, **self._decision_func_kw)
+                    self._pred_y = self._decision_func(self._pred_y, *self._batch_args, **self._decision_func_kw)
                 yield self._pred_y
             self._notify("on_predict_end")
 
@@ -371,18 +359,39 @@ class NeuralNetwork:
             self.module = self.module.to(self._device)
             self.test()
             self._score = []
-            for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
+            for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_score_loader(self._score_loader), start=1):
                 self._batch_X = self._batch_X.to(self._device, non_blocking=True)
                 self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-                batch_out = self.forward(self._batch_X)
+                batch_out = self.forward(self._batch_X, *self._batch_args)
                 if self._score_func is None:
-                    batch_loss = self.get_loss(batch_out, self._batch_y).item()
+                    batch_loss = self.get_loss(batch_out, self._batch_y, *self._batch_args).item()
                 else:
-                    batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), **self._score_func_kw)
+                    batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), *self._batch_args, **self._score_func_kw)
                 self._score.append(batch_loss)
                 
             self._score = torch.tensor(np.stack(self._score)).float().mean(dim=0)
         return self._score
+
+    def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
+        ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''
+        if isinstance(X, DataLoader):
+            return X
+        if isinstance(X, Dataset):
+            return DataLoader(X, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
+        dataset = DefaultDataset(X, y)
+        return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
+
+    def unpack_train_loader(self, train_loader):
+        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
+        yield from train_loader
+
+    def unpack_predict_loader(self, predict_loader):
+        ''' Override this to unpack the dataloader into X, *args. By default, the format is assumed to be this way. '''
+        yield from predict_loader
+
+    def unpack_score_loader(self, score_loader):
+        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
+        yield from score_loader
 
     def _notify(self, method_name, **cb_kwargs):
         for callback in self.cbmanager.callbacks:
