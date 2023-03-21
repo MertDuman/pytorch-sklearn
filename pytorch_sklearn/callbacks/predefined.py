@@ -85,9 +85,10 @@ class History(Callback):
     def _calculate_metrics(self, net):
         batch_out = to_safe_tensor(net._batch_out)
         batch_y = to_safe_tensor(net._batch_y)
+        batch_args = to_safe_tensor(net._batch_args)
         self.epoch_metrics[0] += net._batch_loss.item()
         for i, metric in enumerate(net._metrics.values(), start=1):
-            self.epoch_metrics[i] += metric(batch_out, batch_y)
+            self.epoch_metrics[i] += metric(batch_out, batch_y, *batch_args)
 
 
 class Verbose(Callback):

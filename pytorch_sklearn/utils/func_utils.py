@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from typing import Union, List, Tuple
+
 
 def create_dirs(path):
     import os
@@ -45,7 +47,7 @@ def to_tensor(X: np.ndarray, device=None, dtype=None, clone=True):
     return X
 
 
-def to_safe_tensor(X: torch.Tensor, clone=True):
+def to_safe_tensor(X: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]], clone=True):
     """
     Convert the given ``torch.Tensor`` to another one that is detached and is in cpu.
     ``clone`` is set to True by default to mitigate side-effects that this function might cause.
@@ -54,7 +56,7 @@ def to_safe_tensor(X: torch.Tensor, clone=True):
         ``clone`` allows this function to clone the input always.
     """
     if isinstance(X, (list, tuple)):
-        return list(map(to_safe_tensor, X))
+        return list(map(lambda x: to_safe_tensor(x, clone=clone), X))
 
     old_memory = get_memory_loc(X)
     if X.requires_grad:
