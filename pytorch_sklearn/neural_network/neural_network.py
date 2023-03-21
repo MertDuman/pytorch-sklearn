@@ -209,24 +209,35 @@ class NeuralNetwork:
             self._epoch += 1
         self._notify("on_fit_end")
 
+    def unpack_dataloader(self, data_loader):
+        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
+        yield from data_loader
+
     def fit_epoch(self, data_loader):
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
-        for self._batch, (self._batch_X, self._batch_y) in enumerate(data_loader, start=1):
+        for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_dataloader(data_loader), start=1):
             self._batch_X = self._batch_X.to(self._device, non_blocking=True)
             self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-            self.fit_batch(self._batch_X, self._batch_y)
+            self._fit_batch_wrapper(self._batch_X, self._batch_y, *self._batch_args)
         self._notify(f"on_{self._pass_type}_epoch_end")
 
-    def fit_batch(self, X, y):
+    def _fit_batch_wrapper(self, X, y, *args):
+        ''' Internal wrapper for fit_batch that notifies the callbacks and handles the backward pass. '''
         self._notify(f"on_{self._pass_type}_batch_begin")
-        self._batch_out = self.forward(X)
-        self._batch_loss = self.get_loss(self._batch_out, y)
+        self._batch_out, self._batch_loss = self.fit_batch(X, y, *args)
         if self._pass_type == "train":
             self.backward(self._batch_loss)
         self._notify(f"on_{self._pass_type}_batch_end")
+                       
+    def fit_batch(self, X, y, *args):
+        ''' Compute and return the output and loss for a batch. '''
+        out = self.forward(X)
+        loss = self.get_loss(self._batch_out, y)
+        return out, loss
 
     def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
+        ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''
         if isinstance(X, DataLoader):
             return X
         if isinstance(X, Dataset):
