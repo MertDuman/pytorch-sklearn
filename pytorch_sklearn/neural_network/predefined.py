@@ -10,7 +10,7 @@ class L1L2NeuralNet(NeuralNetwork):
         self.lambda1 = lambda1
         self.lambda2 = lambda2
 
-    def get_loss(self, y_pred, y_true):
+    def get_loss(self, y_pred, y_true, *args):
         crit_loss = self.criterion(y_pred, y_true)
         params = torch.cat([x.view(-1) for x in self.module.parameters()])
         l1_reg = self.lambda1 * torch.norm(params, 1)

@@ -115,7 +115,7 @@ class NeuralNetwork:
     def get_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, *args: Iterable):
         ''' Calculate and return a single loss for the given batch. '''
         return self.criterion(y_pred, y_true)
-
+        
     def zero_grad(self):
         self.optimizer.zero_grad(set_to_none=True)
 
