@@ -382,16 +382,19 @@ class NeuralNetwork:
         return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
     def unpack_train_loader(self, train_loader):
-        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
-        yield from train_loader
+        ''' Override this to unpack the dataloader into X, y, *args. By default, it is assumed that the dataloader returns X, y. '''
+        for X, y in train_loader:
+            yield X, y,
 
     def unpack_predict_loader(self, predict_loader):
-        ''' Override this to unpack the dataloader into X, *args. By default, the format is assumed to be this way. '''
-        yield from predict_loader
+        ''' Override this to unpack the dataloader into X, *args. By default, it is assumed that the dataloader returns X. '''
+        for X in predict_loader:
+            yield X,
 
     def unpack_score_loader(self, score_loader):
-        ''' Override this to unpack the dataloader into X, y, *args. By default, the format is assumed to be this way. '''
-        yield from score_loader
+        ''' Override this to unpack the dataloader into X, y, *args. By default, it is assumed that the dataloader returns X, y. '''
+        for X, y in score_loader:
+            yield X, y,
 
     def _notify(self, method_name, **cb_kwargs):
         for callback in self.cbmanager.callbacks:
