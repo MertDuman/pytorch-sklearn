@@ -26,6 +26,7 @@ TODO:
 
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
+  Could also add a 'reduction' parameter to the metrics, e.g. 'mean' or 'sum' or 'last'.
 
 - If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
