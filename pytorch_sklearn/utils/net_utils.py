@@ -17,6 +17,7 @@ def try_load_network_from_csv(
     net_path: str = None,
     load_best: str = False,
     weight_path: str = None,
+    relative_path: bool = True,
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
@@ -54,6 +55,9 @@ def try_load_network_from_csv(
         If True, will try to load the best weights from weight_path.
     weight_path : str
         Path to the weight file. By default will look for `os.path.join(csv_folder, weights.pth)`.
+    relative_path : bool
+        Whether net and weight path are relative within the csv folder, or the full path. If True, will look for `os.path.join(csv_folder, net_path)`.
+        Otherwise, will look for `net_path`.
     callbacks : list of Callbacks
         Will be passed to the NeuralNetwork.load_class method, and callback states will be instantiated.
     module_list : list of str
@@ -119,8 +123,8 @@ def try_load_network_from_csv(
     except:
         unique_folder = csv_folder
 
-    net_path = osj(unique_folder, 'net.pth') if net_path is None else net_path
-    weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else weight_path
+    net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
+    weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
     
     NeuralNetwork.load_class(net, callbacks, net_path)
 
@@ -140,6 +144,7 @@ def try_load_model_from_csv(
     column_mapper: Mapping[str, str],
     load_best: str = False,
     weight_path: str = None,
+    relative_path: bool = True,
     module_list: Iterable[str] = None,
     device: str = None,
 ): 
@@ -240,7 +245,7 @@ def try_load_model_from_csv(
     except:
         unique_folder = csv_folder
 
-    weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else weight_path
+    weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
 
     if load_best:
         try:
