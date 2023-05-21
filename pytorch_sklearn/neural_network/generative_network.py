@@ -1,19 +1,22 @@
 import pickle
 import copy
+from typing import Callable, Iterable, Mapping, Optional, Union
 import warnings
 
 import torch
+import torch.nn as nn
 from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
 
+from pytorch_sklearn.neural_network import NeuralNetwork
 from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
-from pytorch_sklearn.callbacks import CallbackManager
+from pytorch_sklearn.callbacks import CallbackManager, Callback
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
 
 
-class CycleGAN:
+class CycleGAN(NeuralNetwork):
     """
     Implements CycleGAN from the paper: https://github.com/junyanz/CycleGAN
     Follows similar implementation to: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix
@@ -35,171 +38,74 @@ class CycleGAN:
     criterion : PyTorch loss
         GAN loss that will be applied to discriminator outputs.
     """
-    def __init__(self, generator_A, generator_B, discriminator_A, discriminator_B, optimizer_Gen, optimizer_Disc, criterion):
+    def __init__(
+        self, 
+        G_A: nn.Module, G_B: nn.Module, 
+        D_A: nn.Module, D_B: nn.Module, 
+        G_optim: _Optimizer, D_optim: _Optimizer,
+        criterion: str = "lsgan",
+        cycle_loss: str = "l1",
+        identity_loss: str = "l1",
+        lambda_cycle: float = 10.0,
+        lambda_identity: float = 5.0
+    ):
         # Base parameters
-        self.generator_A = generator_A
-        self.generator_B = generator_B
-        self.discriminator_A = discriminator_A
-        self.discriminator_B = discriminator_B
-        self.optimizer_Gen = optimizer_Gen
-        self.optimizer_Disc = optimizer_Disc
-        self.criterion = criterion
+        self.G_A = G_A
+        self.G_B = G_B
+        self.D_A = D_A
+        self.D_B = D_B
+        self.G_optim = G_optim
+        self.D_optim = D_optim
+        self.lambda_cycle = lambda_cycle
+        self.lambda_identity = lambda_identity
+        
+        # Loss
+        self.implemented_gan_losses = ["lsgan", "gan"]
+        assert criterion in self.implemented_gan_losses, f"Criterion {criterion} not implemented. Choose from {self.implemented_gan_losses}."
+        self.G_criterion, self.D_criterion = self.build_criterion(criterion)
+
+        self.implemented_cycle_losses = ["l1", "l2"]
+        assert cycle_loss in self.implemented_cycle_losses, f"Cycle loss {cycle_loss} not implemented. Choose from {self.implemented_cycle_losses}."
+        self.cycle_loss = nn.L1Loss() if cycle_loss == "l1" else nn.MSELoss()
+
+        self.implemented_identity_losses = ["l1", "l2"]
+        assert identity_loss in self.implemented_identity_losses, f"Identity loss {identity_loss} not implemented. Choose from {self.implemented_identity_losses}."
+        self.identity_loss = nn.L1Loss() if identity_loss == "l1" else nn.MSELoss()
+
         self.cbmanager = CallbackManager()  # SAVED
         self.keep_training = True
 
-        # Maintenance parameters
-        self._using_original = True  # SAVED
-        self._original_state_dict = None  # SAVED
-
-        # Fit function parameters
-        self._train_X = None
-        self._train_y = None
-        self._validate = None
-        self._val_X = None
-        self._val_y = None
-        self._max_epochs = None
-        self._batch_size = None
-        self._use_cuda = None
-        self._fits_gpu = None
-        self._device = None
-        self._callbacks = None
-        self._metrics = None
-
-        # Fit runtime parameters
-        self._epoch = None
-        self._batch = None
-        self._batch_X = None
-        self._batch_y = None
-        self._batch_out = None
-        self._batch_loss = None
-        self._pass_type = None
-        self._num_batches = None
-        self._train_loader = None
-        self._val_loader = None
-
-        # Predict function parameters
-        self._test_X = None
-        self._decision_func = None
-        self._decision_func_kw = None
-
-        # Predict runtime parameters
-        self._predict_loader = None
-        self._pred_y = None
-        self._batch = None
-        self._batch_X = None
-
-        # Predict Proba function parameters
-        self._test_X = None
-
-        # Predict Proba runtime parameters
-        self._predict_proba_loader = None
-        self._proba = None
-        self._batch = None
-        self._batch_X = None
-
-        # Score function parameters
-        self._test_X = None
-        self._test_y = None
-        self._score_func = None
-        self._score_func_kw = None
-
-        # Score runtime parameters
-        self._score_loader = None
-        self._out = None
-        self._score = None
-        self._batch = None
-        self._batch_X = None
-        self._batch_y = None
-
-    @property
-    def callbacks(self):
-        return self.cbmanager.callbacks
-
-    @property
-    def history(self):
-        return self.cbmanager.history
-
-    # Model Training Core Functions
-    def forward(self, X: torch.Tensor):
-        return self.module(X)
-
-    def get_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor):
-        return self.criterion(y_pred, y_true)
-
-    def zero_grad(self):
-        self.optimizer.zero_grad(set_to_none=True)
-
-    def compute_grad(self, loss: torch.Tensor):
-        loss.backward()
-
-    def step_grad(self):
-        self.optimizer.step()
-
-    def backward(self, loss: torch.Tensor):
-        self.zero_grad()
-        self._notify(f"on_grad_compute_begin")
-        self.compute_grad(loss)
-        self._notify(f"on_grad_compute_end")
-        self.step_grad()
-
-    # Model Modes
-    def train(self):
-        self.module.train()
-        self._pass_type = "train"
-
-    def val(self):
-        self.module.eval()
-        self._pass_type = "val"
-
-    def test(self):
-        self.module.eval()
-        self._pass_type = "test"
-
-    # Model Training Main Functions
     def fit(
-            self,
-            train_X=None,
-            train_y=None,
+        self,
+        train_X: Union[torch.Tensor, DataLoader, Dataset],
+        train_y: Optional[torch.Tensor] = None,
+        max_epochs: int = 10,
+        batch_size: int = 32,
+        use_cuda: bool = True,
+        fits_gpu: bool = False,
+        callbacks: Optional[Iterable[Callback]] = None,
+        metrics: Optional[Mapping[str, Callable]] = None,
+    ):
+        super().fit(
+            train_X=train_X,
+            train_y=train_y,
             validate=False,
             val_X=None,
             val_y=None,
-            max_epochs=10,
-            batch_size=32,
-            use_cuda=True,
-            fits_gpu=False,
-            callbacks=None,
-            metrics=None
-    ):
-        # Handle None inputs.
-        callbacks = [] if callbacks is None else callbacks
-        metrics = {} if metrics is None else metrics
-        device = "cuda" if use_cuda else "cpu"
-        if not use_cuda and fits_gpu:
-            fits_gpu = False
-            warnings.warn("Fits gpu is true, but not using CUDA.")
+            max_epochs=max_epochs,
+            batch_size=batch_size,
+            use_cuda=use_cuda,
+            fits_gpu=fits_gpu,
+            callbacks=callbacks,
+            metrics=metrics,
+        )
 
-        if max_epochs == -1:
-            max_epochs = float("inf")
-            warnings.warn("max_epochs is set to -1. Make sure to pass an early stopping method.")
+    def fit_impl(self):
+        self.G_A = self.G_A.to(self._device)
+        self.G_B = self.G_B.to(self._device)
+        self.D_A = self.D_A.to(self._device)
+        self.D_B = self.D_B.to(self._device)
 
-        #  Set fit class parameters
-        fit_params = locals().copy()
-        set_properties_hidden(**fit_params)
-
-        # Handle CallbackManager
-        self.cbmanager.callbacks = callbacks
-
-        # Define DataLoaders
-        self._train_X = self._to_tensor(self._train_X)
-        self._train_y = self._to_tensor(self._train_y)
-        self._train_loader = self.get_dataloader(self._train_X, self._train_y, self._batch_size, shuffle=True)
-        if self._validate:
-            self._val_X = self._to_tensor(self._val_X)
-            self._val_y = self._to_tensor(self._val_y)
-            self._val_loader = self.get_dataloader(self._val_X, self._val_y, self._batch_size, shuffle=True)
-
-        # Begin Fit
-        self.module = self.module.to(self._device)
         self._notify("on_fit_begin")
         self._epoch = 1
         while self._epoch < self._max_epochs + 1:
@@ -208,10 +114,6 @@ class CycleGAN:
                 break
             self.train()
             self.fit_epoch(self._train_loader)
-            if self._validate:
-                with torch.no_grad():
-                    self.val()
-                    self.fit_epoch(self._val_loader)
 
             if self._epoch == self._max_epochs:
                 break  # so that self._epoch == self._max_epochs when loop exits.
@@ -221,157 +123,116 @@ class CycleGAN:
     def fit_epoch(self, data_loader):
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
-        for self._batch, (self._batch_X, self._batch_y) in enumerate(data_loader, start=1):
-            self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-            self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-            self.fit_batch(self._batch_X, self._batch_y)
+        for self._batch, self._batch_data in enumerate(data_loader, start=1):
+            self._notify(f"on_{self._pass_type}_batch_begin")
+
+            self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
+
+            self._notify(f"on_{self._pass_type}_batch_end")
         self._notify(f"on_{self._pass_type}_epoch_end")
 
-    def fit_batch(self, X, y):
-        self._notify(f"on_{self._pass_type}_batch_begin")
-        self._batch_out = self.forward(X)
-        self._batch_loss = self.get_loss(self._batch_out, y)
-        if self._pass_type == "train":
-            self.backward(self._batch_loss)
-        self._notify(f"on_{self._pass_type}_batch_end")
+    def unpack_fit_batch(self, batch_data):
+        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
+        A, B = batch_data
+        return [], [A, B]
 
-    def get_dataloader(self, X, y, batch_size, shuffle):
-        dataset = self.get_dataset(X, y)
-        if self._fits_gpu:
-            return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0, pin_memory=True)
+    def fit_batch(self, batch_data):
+        _, [A, B] = self.unpack_fit_batch(batch_data)
+        A = A.to(self._device, non_blocking=True)
+        B = B.to(self._device, non_blocking=True)
 
-    def get_dataset(self, X, y):
-        if isinstance(X, Dataset):
-            return X
-        if self._fits_gpu:
-            return CUDADataset(X, y)
-        return DefaultDataset(X, y)
+        A2B = self.G_A(A)
+        B2A = self.G_B(B)
+        A2B2A = self.G_B(A2B)
+        B2A2B = self.G_A(B2A)
+        A2A = self.G_B(A)
+        B2B = self.G_A(B)
 
-    def predict(self, test_X, decision_func=None, **decision_func_kw):
-        #  Set predict class parameters
-        predict_params = locals().copy()
-        set_properties_hidden(**predict_params)
+        B2A_logits = self.D_A(B2A)
+        A2B_logits = self.D_B(A2B)
 
-        self._test_X = self._to_tensor(self._test_X)
-        self._predict_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+        # Generator loss
+        A2B_g_loss = self.G_criterion(A2B_logits)
+        B2A_g_loss = self.G_criterion(B2A_logits)
+        A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
+        B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
+        A2A_identity_loss = self.identity_loss(A2A, A)
+        B2B_identity_loss = self.identity_loss(B2B, B)
 
-        with torch.no_grad():
-            self.test()
-            self._notify("on_predict_begin")
-            self._pred_y = []
-            for self._batch, (self._batch_X) in enumerate(self._predict_loader, start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                pred_y = self.forward(self._batch_X)
-                if self._decision_func is not None:
-                    pred_y = self._decision_func(pred_y, **self._decision_func_kw)
-                self._pred_y.append(pred_y)
-            self._pred_y = torch.cat(self._pred_y)
-            self._notify("on_predict_end")
-        return self._pred_y
+        G_loss = A2B_g_loss + B2A_g_loss + \
+            (A2B2A_cycle_loss + B2A2B_cycle_loss) * self.lambda_cycle + \
+            (A2A_identity_loss + B2B_identity_loss) * self.lambda_identity
+        
+        self.backward(G_loss, self.G_optim)
 
-    def predict_proba(self, test_X):
-        #  Set predict_proba class parameters
-        proba_params = locals().copy()
-        set_properties_hidden(**proba_params)
+        # Gradients past this point are not needed
+        A2B = A2B.detach()
+        B2A = B2A.detach()
 
-        self._test_X = self._to_tensor(self._test_X)
-        self._predict_proba_loader = self.get_dataloader(self._test_X, None, self._batch_size, shuffle=False)
+        # Discriminator loss
+        A_logits = self.D_A(A)
+        B_logits = self.D_B(B)
+        B2A_d_logits = self.D_A(B2A)
+        A2B_d_logits = self.D_B(A2B)
 
-        with torch.no_grad():
-            self.test()
-            self._notify("on_predict_proba_begin")
-            self._proba = []
-            for self._batch, (self._batch_X) in enumerate(self._predict_proba_loader, start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._proba.append(self.forward(self._batch_X))
-            self._proba = torch.cat(self._proba)
-            self._notify("on_predict_proba_end")
-        return self._proba
+        A_d_loss, B2A_d_loss = self.D_criterion(A_logits, B2A_d_logits)
+        B_d_loss, A2B_d_loss = self.D_criterion(B_logits, A2B_d_logits)
 
-    def score(self, test_X, test_y, score_func=None, **score_func_kw):
-        #  Set score class parameters
-        score_params = locals().copy()
-        set_properties_hidden(**score_params)
+        D_loss = A_d_loss + B_d_loss + B2A_d_loss + A2B_d_loss
 
-        self._test_X = self._to_tensor(self._test_X)
-        self._test_y = self._to_tensor(self._test_y)
-        self._score_loader = self.get_dataloader(self._test_X, self._test_y, self._batch_size, shuffle=False)
+        self.backward(D_loss, self.D_optim)
+        
+        return [A2B, B2A], G_loss + D_loss
 
-        with torch.no_grad():
-            self.test()
-            self._out = []
-            self._score = []
-            for self._batch, (self._batch_X, self._batch_y) in enumerate(self._score_loader, start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-                batch_out = self.forward(self._batch_X)
-                if self._score_func is None:
-                    batch_loss = self.get_loss(batch_out, self._batch_y).item()
-                else:
-                    batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y),
-                                                  **self._score_func_kw)
-                self._out.append(batch_out)
-                self._score.append(batch_loss)
-            self._out = torch.cat(self._out)
-            self._score = torch.Tensor(self._score).mean()
-        return self._score
+    def build_criterion(self, criterion: str):
+        """
+        Builds the criterion based on the input string.
 
-    def _notify(self, method_name, **cb_kwargs):
-        for callback in self.cbmanager.callbacks:
-            if method_name in callback.__class__.__dict__:  # check if method is overridden
-                getattr(callback, method_name)(self, **cb_kwargs)
+        Parameters
+        ----------
+        criterion : str
+            Name of the criterion to use.
 
-    def _to_tensor(self, X):
-        return to_tensor(X, clone=False)
+        Returns
+        -------
+        criterion : PyTorch loss
+            The criterion to use.
+        """
+        if criterion == "lsgan":
+            mse = nn.MSELoss()
+            def G_criterion(f_logits):
+                return mse(f_logits, torch.ones_like(f_logits))
+            def D_criterion(r_logits, f_logits):
+                return mse(r_logits, torch.ones_like(r_logits)), mse(f_logits, torch.zeros_like(f_logits))
+            return G_criterion, D_criterion
+        elif criterion == "gan":
+            bce = nn.BCEWithLogitsLoss()
+            def G_criterion(f_logits):
+                return bce(f_logits, torch.ones_like(f_logits))
+            def D_criterion(r_logits, f_logits):
+                return bce(r_logits, torch.ones_like(r_logits)), bce(f_logits, torch.zeros_like(f_logits))
+            return G_criterion, D_criterion
+        else:
+            raise ValueError(f"Criterion {criterion} not implemented.")
+        
+    # Model Modes
+    def train(self):
+        self.G_A.train()
+        self.G_B.train()
+        self.D_A.train()
+        self.D_B.train()
+        self._pass_type = "train"
 
-    def _to_safe_tensor(self, X):
-        return to_safe_tensor(X, clone=False)
+    def val(self):
+        self.G_A.eval()
+        self.G_B.eval()
+        self.D_A.eval()
+        self.D_B.eval()
+        self._pass_type = "val"
 
-    def load_weights(self, weight_checkpoint):
-        if self._using_original:
-            self._original_state_dict = copy.deepcopy(self.module.state_dict())
-        self.module.load_state_dict(weight_checkpoint.best_weights)
-        self._using_original = False
-
-    def load_weights_from_path(self, weight_path):
-        if self._using_original:
-            self._original_state_dict = copy.deepcopy(self.module.state_dict())
-        self.module.load_state_dict(torch.load(weight_path))
-        self._using_original = False
-
-    def load_original_weights(self):
-        if not self._using_original:
-            self.module.load_state_dict(self._original_state_dict)
-            self._using_original = True
-            self._original_state_dict = None
-
-    @classmethod
-    def save_class(cls, net, savepath):
-        d = {
-            "module_state": net.module.state_dict(),
-            "original_module_state": net._original_state_dict,
-            "using_original": net._using_original,
-            "optimizer_state": net.optimizer.state_dict(),
-            "criterion_state": net.criterion.state_dict(),
-            "cbmanager": net.cbmanager
-        }
-        with open(savepath, "wb") as f:
-            pickle.dump(d, f)
-
-    @classmethod
-    def load_class(cls, loadpath, module=None, optimizer=None, criterion=None):
-        with open(loadpath, "rb") as f:
-            d = pickle.load(f)
-
-        if module is not None:
-            module.load_state_dict(d["module_state"])
-        if optimizer is not None:
-            optimizer.load_state_dict(d["optimizer_state"])
-        if criterion is not None:
-            criterion.load_state_dict(d["criterion_state"])
-        net = NeuralNetwork(module, optimizer, criterion)
-        net.cbmanager = d["cbmanager"]
-        net._using_original = d["using_original"]
-        net._original_state_dict = d["original_module_state"]
-        return net
+    def test(self):
+        self.G_A.eval()
+        self.G_B.eval()
+        self.D_A.eval()
+        self.D_B.eval()
+        self._pass_type = "test"

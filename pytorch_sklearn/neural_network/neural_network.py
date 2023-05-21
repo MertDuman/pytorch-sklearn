@@ -4,6 +4,7 @@ import warnings
 
 import numpy
 import torch
+import torch.nn as nn
 import numpy as np
 from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
@@ -31,7 +32,7 @@ TODO:
 
 
 class NeuralNetwork:
-    def __init__(self, module: torch.nn.Module, optimizer: _Optimizer, criterion: _Loss):
+    def __init__(self, module: nn.Module, optimizer: _Optimizer, criterion: _Loss):
         # Base parameters
         self.module = module  # SAVED
         self.optimizer = optimizer  # SAVED
@@ -60,8 +61,8 @@ class NeuralNetwork:
         self._epoch: int  # SAVED
         self._batch: int  # SAVED
         self._batch_data: Any
-        self._batch_out: torch.Tensor
-        self._batch_loss: torch.Tensor
+        self._batch_out: Union[torch.Tensor, Iterable[torch.Tensor]]
+        self._batch_loss: Union[torch.Tensor, Iterable[torch.Tensor]]
         self._pass_type: str
         self._num_batches: int
         self._train_loader: DataLoader
@@ -100,21 +101,21 @@ class NeuralNetwork:
     def history(self):
         return self.cbmanager.history
         
-    def zero_grad(self):
-        self.optimizer.zero_grad(set_to_none=True)
+    def zero_grad(self, optimizer: _Optimizer):
+        optimizer.zero_grad(set_to_none=True)
 
     def compute_grad(self, loss: torch.Tensor):
         loss.backward()
 
-    def step_grad(self):
-        self.optimizer.step()
+    def step_grad(self, optimizer: _Optimizer):
+        optimizer.step()
 
-    def backward(self, loss: torch.Tensor):
-        self.zero_grad()
+    def backward(self, loss: torch.Tensor, optimizer: _Optimizer):
+        self.zero_grad(optimizer)
         self._notify(f"on_grad_compute_begin")
         self.compute_grad(loss)
         self._notify(f"on_grad_compute_end")
-        self.step_grad()
+        self.step_grad(optimizer)
 
     # Model Modes
     def train(self):
@@ -174,7 +175,9 @@ class NeuralNetwork:
             self._val_y = self._to_tensor(self._val_y) # type: ignore
             self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False) # type: ignore
 
-        # Begin Fit
+        self.fit_impl()
+
+    def fit_impl(self):
         self.module = self.module.to(self._device)
         self._notify("on_fit_begin")
         self._epoch = 1
@@ -202,7 +205,7 @@ class NeuralNetwork:
 
             self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
             if self._pass_type == "train":
-                self.backward(self._batch_loss)
+                self.backward(self._batch_loss, self.optimizer)
 
             self._notify(f"on_{self._pass_type}_batch_end")
         self._notify(f"on_{self._pass_type}_epoch_end")
