@@ -14,15 +14,12 @@ from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
 
-from typing import Iterable, Optional, Union
+from typing import Any, Callable, Iterable, Mapping, Optional, Union
 
 
 """
 TODO:
 - Documentation missing.
-  
-- Adding metrics at a second or third fit call results in an error, because we only initialize metrics to the
-  history track on the first fit call.
 
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
@@ -44,61 +41,56 @@ class NeuralNetwork:
 
         # Maintenance parameters
         self._using_original = True  # SAVED
-        self._original_state_dict = None  # SAVED
+        self._original_state_dict: Optional[Mapping[str, Any]] # SAVED
 
         # Fit function parameters
-        self._train_X = None
-        self._train_y = None
-        self._validate = None
-        self._val_X = None
-        self._val_y = None
-        self._max_epochs = None
-        self._batch_size = None
-        self._use_cuda = None
-        self._fits_gpu = None
-        self._callbacks = None
-        self._metrics = None
+        self._train_X: Union[torch.Tensor, DataLoader, Dataset]
+        self._train_y: Optional[torch.Tensor]
+        self._validate: bool
+        self._val_X: Union[torch.Tensor, DataLoader, Dataset]
+        self._val_y: Optional[torch.Tensor]
+        self._max_epochs: int
+        self._batch_size: int
+        self._use_cuda: bool
+        self._fits_gpu: bool
+        self._callbacks: Iterable[Callback]
+        self._metrics: Mapping[str, Callable]
 
         # Fit runtime parameters
-        self._epoch = None  # SAVED
-        self._batch = None  # SAVED
-        self._batch_X = None
-        self._batch_y = None
-        self._batch_args = None
-        self._batch_out = None
-        self._batch_loss = None
-        self._pass_type = None
-        self._num_batches = None
-        self._train_loader = None
-        self._val_loader = None
-        self._device = None
+        self._epoch: int  # SAVED
+        self._batch: int  # SAVED
+        self._batch_data: Any
+        self._batch_out: torch.Tensor
+        self._batch_loss: torch.Tensor
+        self._pass_type: str
+        self._num_batches: int
+        self._train_loader: DataLoader
+        self._val_loader: DataLoader
+        self._device: str
 
         # Predict function parameters
-        self._test_X = None
-        self._decision_func = None
-        self._decision_func_kw = None
+        self._test_X: Union[torch.Tensor, DataLoader, Dataset]
+        self._decision_func: Optional[Callable]
+        self._decision_func_kw: Mapping[str, Any]
 
         # Predict runtime parameters
-        self._predict_loader = None
-        self._pred_y = None
-        self._batch = None
-        self._batch_X = None
-        self._batch_args = None
+        self._predict_loader: DataLoader
+        self._pred_y: Iterable
+        self._batch: int
+        self._batch_data: Any
 
         # Score function parameters
-        self._test_X = None
-        self._test_y = None
-        self._score_func = None
-        self._score_func_kw = None
+        self._test_X: Union[torch.Tensor, DataLoader, Dataset]
+        self._test_y: Optional[torch.Tensor]
+        self._score_func: Optional[Callable]
+        self._score_func_kw: Mapping[str, Any]
 
         # Score runtime parameters
-        self._score_loader = None
-        self._out = None
-        self._score = None
-        self._batch = None
-        self._batch_X = None
-        self._batch_y = None
-        self._batch_args = None
+        self._score_loader: DataLoader
+        self._out: torch.Tensor
+        self._score: Iterable
+        self._batch: int
+        self._batch_data: Any
 
     @property
     def callbacks(self):
@@ -107,15 +99,6 @@ class NeuralNetwork:
     @property
     def history(self):
         return self.cbmanager.history
-
-    # Model Training Core Functions
-    def forward(self, X: torch.Tensor, *args: Iterable):
-        ''' Simply perform forward pass through the model and return the batch output. '''
-        return self.module(X)
-
-    def get_loss(self, y_pred: torch.Tensor, y_true: torch.Tensor, *args: Iterable):
-        ''' Calculate and return a single loss for the given batch. '''
-        return self.criterion(y_pred, y_true)
         
     def zero_grad(self):
         self.optimizer.zero_grad(set_to_none=True)
@@ -149,17 +132,17 @@ class NeuralNetwork:
     # Model Training Main Functions
     def fit(
         self,
-        train_X,
-        train_y=None,
-        validate=False,
-        val_X=None,
-        val_y=None,
-        max_epochs=10,
-        batch_size=32,
-        use_cuda=True,
-        fits_gpu=False,
-        callbacks=None,
-        metrics=None
+        train_X: Union[torch.Tensor, DataLoader, Dataset],
+        train_y: Optional[torch.Tensor] = None,
+        validate: bool = False,
+        val_X: Optional[Union[torch.Tensor, DataLoader, Dataset]] = None,
+        val_y: Optional[torch.Tensor] = None,
+        max_epochs: int = 10,
+        batch_size: int = 32,
+        use_cuda: bool = True,
+        fits_gpu: bool = False,
+        callbacks: Optional[Iterable[Callback]] = None,
+        metrics: Optional[Mapping[str, Callable]] = None,
     ):
         # Handle None inputs.
         # Assume cbmanager has callbacks. If not, then set as empty array.
@@ -172,7 +155,7 @@ class NeuralNetwork:
             warnings.warn("Fits gpu is true, but not using CUDA.")
 
         if max_epochs == -1:
-            max_epochs = float("inf")
+            max_epochs = float("inf") # type: ignore
             warnings.warn("max_epochs is set to -1. Make sure to pass an early stopping method.")
 
         #  Set fit class parameters
@@ -184,12 +167,12 @@ class NeuralNetwork:
 
         # Define DataLoaders
         self._train_X = self._to_tensor(self._train_X)
-        self._train_y = self._to_tensor(self._train_y)
-        self._train_loader = self.get_dataloader(self._train_X, self._train_y, shuffle=True)
+        self._train_y = self._to_tensor(self._train_y) # type: ignore
+        self._train_loader = self.get_dataloader(self._train_X, self._train_y, shuffle=True) # type: ignore
         if self._validate:
             self._val_X = self._to_tensor(self._val_X)
-            self._val_y = self._to_tensor(self._val_y)
-            self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False)
+            self._val_y = self._to_tensor(self._val_y) # type: ignore
+            self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False) # type: ignore
 
         # Begin Fit
         self.module = self.module.to(self._device)
@@ -214,33 +197,41 @@ class NeuralNetwork:
     def fit_epoch(self, data_loader):
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
-        for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_train_loader(data_loader), start=1):
-            self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-            self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-            self._fit_batch_wrapper(self._batch_X, self._batch_y, *self._batch_args)
-        self._notify(f"on_{self._pass_type}_epoch_end")
+        for self._batch, self._batch_data in enumerate(data_loader, start=1):
+            self._notify(f"on_{self._pass_type}_batch_begin")
 
-    def _fit_batch_wrapper(self, X, y, *args):
-        ''' Internal wrapper for fit_batch that notifies the callbacks and handles the backward pass. '''
-        self._notify(f"on_{self._pass_type}_batch_begin")
-        self._batch_out, self._batch_loss = self.fit_batch(X, y, *args)
-        if self._pass_type == "train":
-            self.backward(self._batch_loss)
-        self._notify(f"on_{self._pass_type}_batch_end")
+            self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
+            if self._pass_type == "train":
+                self.backward(self._batch_loss)
+
+            self._notify(f"on_{self._pass_type}_batch_end")
+        self._notify(f"on_{self._pass_type}_epoch_end")
                        
-    def fit_batch(self, X, y, *args):
-        ''' Compute and return the output and loss for a batch. '''
-        out = self.forward(X, *args)
-        loss = self.get_loss(out, y, *args)
+    def fit_batch(self, batch_data):
+        ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
+            
+        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and that the model
+        outputs a single tensor. The loss is computed using the criterion, model output, and target ``y``.
+
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``fit``.
+        '''
+        X, y = batch_data
+        X = X.to(self._device, non_blocking=True)
+        y = y.to(self._device, non_blocking=True)
+        out = self.module(X)
+        loss = self.criterion(out, y)
         return out, loss
 
     def predict(
         self,
-        test_X,
-        batch_size=None,
-        use_cuda=None,
-        fits_gpu=None,
-        decision_func=None,
+        test_X: Union[torch.Tensor, Dataset, DataLoader],
+        batch_size: Optional[int] = None,
+        use_cuda: Optional[bool] = None,
+        fits_gpu: Optional[bool] = None,
+        decision_func: Optional[Callable] = None,
         **decision_func_kw
     ):
         # Handle None inputs.
@@ -270,11 +261,8 @@ class NeuralNetwork:
             self.test()
             self._notify("on_predict_begin")
             self._pred_y = []
-            for self._batch, (self._batch_X, *self._batch_args) in enumerate(self.unpack_predict_loader(self._predict_loader), start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                pred_y = self.forward(self._batch_X, *self._batch_args)
-                if self._decision_func is not None:
-                    pred_y = self._decision_func(pred_y, *self._batch_args, **self._decision_func_kw)
+            for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
+                pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 self._pred_y.append(pred_y)
             self._pred_y = torch.cat(self._pred_y)
             self._notify("on_predict_end")
@@ -282,11 +270,11 @@ class NeuralNetwork:
 
     def predict_generator(
         self,
-        test_X,
-        batch_size=None,
-        use_cuda=None,
-        fits_gpu=None,
-        decision_func=None,
+        test_X: Union[torch.Tensor, Dataset, DataLoader],
+        batch_size: Optional[int] = None,
+        use_cuda: Optional[bool] = None,
+        fits_gpu: Optional[bool] = None,
+        decision_func: Optional[Callable] = None,
         **decision_func_kw
     ):
         # Handle None inputs.
@@ -315,22 +303,40 @@ class NeuralNetwork:
             self.module = self.module.to(self._device)
             self.test()
             self._notify("on_predict_begin")
-            for self._batch, (self._batch_X, *self._batch_args) in enumerate(self.unpack_predict_loader(self._predict_loader), start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._pred_y = self.forward(self._batch_X, *self._batch_args)
-                if self._decision_func is not None:
-                    self._pred_y = self._decision_func(self._pred_y, *self._batch_args, **self._decision_func_kw)
+            for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
+                self._pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 yield self._pred_y
             self._notify("on_predict_end")
 
+    def predict_batch(self, batch_data, decision_func: Optional[Callable] = None, **decision_func_kw):
+        ''' Compute and return the output for a batch. This method should be overridden by subclasses.
+        
+        The default implementation assumes that ``batch_data`` is a single tensor.
+                
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``predict`` or ``predict_generator``.
+        decision_func : Optional[Callable]
+            Decision function passed to ``predict`` or ``predict_generator``.. If None, the output of the model is returned.
+        **decision_func_kw
+            Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
+        '''
+        X = batch_data
+        X = X.to(self._device, non_blocking=True)
+        out = self.module(X)
+        if decision_func is not None:
+            out = decision_func(out, **decision_func_kw)
+        return out
+
     def score(
         self,
-        test_X,
-        test_y=None,
-        batch_size=None,
-        use_cuda=None,
-        fits_gpu=None,
-        score_func=None,
+        test_X: Union[torch.Tensor, Dataset, DataLoader],
+        test_y: Optional[torch.Tensor] = None,
+        batch_size: Optional[int] = None,
+        use_cuda: Optional[bool] = None,
+        fits_gpu: Optional[bool] = None,
+        score_func: Optional[Callable] = None,
         **score_func_kw
     ):
         # Handle None inputs.
@@ -353,25 +359,45 @@ class NeuralNetwork:
         set_properties_hidden(**score_params)
 
         self._test_X = self._to_tensor(self._test_X)
-        self._test_y = self._to_tensor(self._test_y)
-        self._score_loader = self.get_dataloader(self._test_X, self._test_y, shuffle=False)
+        self._test_y = self._to_tensor(self._test_y) # type: ignore
+        self._score_loader = self.get_dataloader(self._test_X, self._test_y, shuffle=False) # type: ignore
 
         with torch.no_grad():
             self.module = self.module.to(self._device)
             self.test()
             self._score = []
-            for self._batch, (self._batch_X, self._batch_y, *self._batch_args) in enumerate(self.unpack_score_loader(self._score_loader), start=1):
-                self._batch_X = self._batch_X.to(self._device, non_blocking=True)
-                self._batch_y = self._batch_y.to(self._device, non_blocking=True)
-                batch_out = self.forward(self._batch_X, *self._batch_args)
-                if self._score_func is None:
-                    batch_loss = self.get_loss(batch_out, self._batch_y, *self._batch_args).item()
-                else:
-                    batch_loss = self._score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(self._batch_y), *self._batch_args, **self._score_func_kw)
-                self._score.append(batch_loss)
+            for self._batch, self._batch_data in enumerate(self._score_loader, start=1):
+                batch_score = self.score_batch(self._batch_data, self._score_func, **self._score_func_kw)
+                self._score.append(batch_score)
                 
             self._score = torch.tensor(np.stack(self._score)).float().mean(dim=0)
         return self._score
+    
+    def score_batch(self, batch_data: Any, score_func: Optional[Callable] = None, **score_func_kw):
+        ''' Compute and return the score for a batch. This method should be overridden by subclasses.
+        
+        The default implementation assumes that ``batch_data`` is a tuple of tensors ``(X, y)``.
+        If ``score_func`` is None, score is computed using the criterion, model output, and target ``y``.
+
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``score``.
+        score_func : Optional[Callable]
+            Score function passed to ``score``. If None, the criterion is used by default.
+        **score_func_kw
+            Keyword arguments passed to ``score_func``, provided to ``score``.
+        '''
+        X, y = batch_data
+        X = X.to(self._device, non_blocking=True)
+        y = y.to(self._device, non_blocking=True)
+        out = self.module(X)
+        
+        if score_func is None:
+            score = self.criterion(out, y).item()
+        else:
+            score = score_func(self._to_safe_tensor(out), self._to_safe_tensor(y), **score_func_kw)
+        return score
 
     def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
         ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''
@@ -382,27 +408,12 @@ class NeuralNetwork:
         dataset = DefaultDataset(X, y)
         return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
-    def unpack_train_loader(self, train_loader):
-        ''' Override this to unpack the dataloader into X, y, *args. By default, it is assumed that the dataloader returns X, y. '''
-        for X, y in train_loader:
-            yield X, y,
-
-    def unpack_predict_loader(self, predict_loader):
-        ''' Override this to unpack the dataloader into X, *args. By default, it is assumed that the dataloader returns X. '''
-        for X in predict_loader:
-            yield X,
-
-    def unpack_score_loader(self, score_loader):
-        ''' Override this to unpack the dataloader into X, y, *args. By default, it is assumed that the dataloader returns X, y. '''
-        for X, y in score_loader:
-            yield X, y,
-
     def _notify(self, method_name, **cb_kwargs):
         for callback in self.cbmanager.callbacks:
             if method_name in callback.__class__.__dict__:  # check if method is overridden
                 getattr(callback, method_name)(self, **cb_kwargs)
 
-    def _to_tensor(self, X):
+    def _to_tensor(self, X: Any):
         if X is None or isinstance(X, (DataLoader, Dataset)):
             return X
         if numpy.ndim(X) == 0:  # Some type without a dimension.
@@ -428,7 +439,7 @@ class NeuralNetwork:
         self._using_original = False
 
     def load_original_weights(self):
-        if not self._using_original:
+        if not self._using_original and self._original_state_dict is not None:  # second condition is always true, but there for type checking.
             self.module.load_state_dict(self._original_state_dict)
             self._using_original = True
             self._original_state_dict = None
