@@ -36,7 +36,7 @@ class History(Callback):
         self.name = "History"
         self.track = {}
         self.sessions = []
-        self.epoch_metrics = None
+        self.epoch_metrics: np.ndarray
         self.key_index = {}  # given key in track, return index in epoch_metrics.
         self.num_metrics = -1
         self.session = -1
@@ -82,13 +82,12 @@ class History(Callback):
     def on_val_batch_end(self, net):
         self._calculate_metrics(net)
 
-    def _calculate_metrics(self, net):
+    def _calculate_metrics(self, net: "psk.NeuralNetwork"):
         batch_out = to_safe_tensor(net._batch_out)
-        batch_y = to_safe_tensor(net._batch_y)
-        batch_args = to_safe_tensor(net._batch_args)
+        _, batch_y = net.unpack_fit_batch(net._batch_data)
         self.epoch_metrics[0] += net._batch_loss.item()
         for i, metric in enumerate(net._metrics.values(), start=1):
-            self.epoch_metrics[i] += metric(batch_out, batch_y, *batch_args)
+            self.epoch_metrics[i] += metric(batch_out, batch_y)
 
 
 class Verbose(Callback):
@@ -163,7 +162,7 @@ class Verbose(Callback):
             self.rem_time = ((net._num_batches - net._batch) * self.total_time) / net._batch
 
         # Fill print data
-        opt = None
+        opt = []
         if self.verbose >= 2:
             opt = [f"{net._pass_type}_loss: {epoch_metrics[0]:.3f}"]
         if self.verbose >= 3:
@@ -597,11 +596,12 @@ class ImageOutputWriter(Callback):
     def identity(self, x):
         return x
 
-    def on_train_batch_end(self, net):
+    def on_train_batch_end(self, net: "psk.NeuralNetwork"):
         if net._batch % self.freq == 0:
             batch_out = to_safe_tensor(net._batch_out)
-            batch_X = to_safe_tensor(net._batch_X)
-            batch_y = to_safe_tensor(net._batch_y)
+            batch_X, batch_y = net.unpack_fit_batch(net._batch_data)
+            batch_X = to_safe_tensor(batch_X)
+            batch_y = to_safe_tensor(batch_y)
 
             if self.clamp01:
                 batch_out = torch.clamp(batch_out, 0, 1)

@@ -218,12 +218,20 @@ class NeuralNetwork:
         batch_data : Any
             Batch data as returned by the dataloader provided to ``fit``.
         '''
-        X, y = batch_data
+        X, y = self.unpack_fit_batch(batch_data)
         X = X.to(self._device, non_blocking=True)
         y = y.to(self._device, non_blocking=True)
         out = self.module(X)
         loss = self.criterion(out, y)
         return out, loss
+    
+    def unpack_fit_batch(self, batch_data):
+        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
+        This is a convenience method for subclasses that don't want to override ``fit_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
 
     def predict(
         self,
@@ -322,12 +330,20 @@ class NeuralNetwork:
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
-        X = batch_data
+        X = self.unpack_predict_batch(batch_data)
         X = X.to(self._device, non_blocking=True)
         out = self.module(X)
         if decision_func is not None:
             out = decision_func(out, **decision_func_kw)
         return out
+    
+    def unpack_predict_batch(self, batch_data):
+        ''' Unpacks batch data into X. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a single tensor.
+        This is a convenience method for subclasses that don't want to override ``predict_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
 
     def score(
         self,
@@ -398,6 +414,14 @@ class NeuralNetwork:
         else:
             score = score_func(self._to_safe_tensor(out), self._to_safe_tensor(y), **score_func_kw)
         return score
+    
+    def unpack_score_batch(self, batch_data):
+        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
+        This is a convenience method for subclasses that don't want to override ``score_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
 
     def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
         ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''
