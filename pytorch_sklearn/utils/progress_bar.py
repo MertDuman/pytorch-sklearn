@@ -1,4 +1,4 @@
-def print_progress(cur, tot, fill="=", close=["[", "]"], length=20, opt=None, sep=" - ", add_newline=False):
+def print_progress(cur, tot, fill="=", close=["[", "]"], length=20, opt=None, sep=" - ", add_newline=False, notebook=False):
     """
     Creates a progress bar that updates itself given the current value and max value.
 
@@ -47,7 +47,8 @@ def print_progress(cur, tot, fill="=", close=["[", "]"], length=20, opt=None, se
     else:
         opt = ""
 
-    print(f"{cur:>{char_size}}/{tot} {close[0]}{fill * perc:{length}}{close[1]}{opt}", end='\x1b[2k\r', flush=True)
+    end = '\r' if notebook else '\x1b[2k\r'
+    print(f"{cur:>{char_size}}/{tot} {close[0]}{fill * perc:{length}}{close[1]}{opt}", end=end, flush=True)
 
     if cur == tot or add_newline:
         print()  # print a new line

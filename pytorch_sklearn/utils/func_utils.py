@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from typing import Union, List, Tuple
+from typing import Iterable, Union, List, Tuple
 
 
 def create_dirs(path):
@@ -35,7 +35,7 @@ def to_numpy(X: torch.Tensor, clone=True):
     return X.numpy()
 
 
-def to_tensor(X: np.ndarray, device=None, dtype=None, clone=True):
+def to_tensor(X: Iterable, device=None, dtype=None, clone=True):
     """
     Converts the given input to ``torch.Tensor`` and optionally clones it (True by default).
     If ``clone`` is False, this function may still clone the input, read ``torch.as_tensor``.

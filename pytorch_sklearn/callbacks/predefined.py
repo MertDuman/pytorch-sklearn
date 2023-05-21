@@ -92,7 +92,7 @@ class History(Callback):
 
 
 class Verbose(Callback):
-    def __init__(self, verbose=4):
+    def __init__(self, verbose=4, notebook=False):
         """
         Prints the following training information:
             - Current Epoch / Total Epochs
@@ -115,6 +115,7 @@ class Verbose(Callback):
         super().__init__()
         self.name = "Verbose"
         self.verbose = verbose
+        self.notebook = notebook
 
         # Time info
         self.total_time = 0
@@ -169,7 +170,7 @@ class Verbose(Callback):
             opt.extend([f"{net._pass_type}_{name}: {epoch_metrics[i]:.3f}" for i, name in enumerate(net._metrics.keys(), start=1)])
         if self.verbose >= 4:
             opt.extend([f"Time: {self.total_time:.2f}", f"ETA: {self.rem_time:.2f}"])
-        print_progress(net._batch, net._num_batches, opt=opt)
+        print_progress(net._batch, net._num_batches, opt=opt, notebook=self.notebook)
 
 
 class LossPlot(Callback):
