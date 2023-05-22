@@ -56,7 +56,8 @@ class History(Callback):
         self.init_track(net, "train")
         if net._validate:
             self.init_track(net, "val")
-        self.sessions.append(len(self.track["train_loss"]) + 1)  # new session starts at epoch = len(train_loss) + 1
+        session_start = len(self.track[next(iter(self.track))]) + 1  # new session starts at epoch = len(first_key) + 1
+        self.sessions.append(session_start)  
 
     def on_train_epoch_begin(self, net):
         self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics, this is possible because dict keys are ordered in Python 3.7
@@ -87,6 +88,79 @@ class History(Callback):
         _, batch_y = net.unpack_fit_batch(net._batch_data)
         self.epoch_metrics[0] += net._batch_loss.item()
         for i, metric in enumerate(net._metrics.values(), start=1):
+            self.epoch_metrics[i] += metric(batch_out, batch_y)
+
+
+class CycleGANHistory(History):
+    def __init__(self):
+        super().__init__()
+        self.name = "History"
+        self.track = {}
+        self.sessions = []
+        self.epoch_metrics: np.ndarray
+        self.key_index = {}  # given key in track, return index in epoch_metrics.
+        self.num_metrics = -1
+        self.session = -1
+
+    def init_track(self, net, pass_type):
+        if f"{pass_type}_G_A_loss" not in self.track:
+            self.track[f"{pass_type}_G_A_loss"] = []
+            self.key_index[f"{pass_type}_G_A_loss"] = 0
+        if f"{pass_type}_G_B_loss" not in self.track:
+            self.track[f"{pass_type}_G_B_loss"] = []
+            self.key_index[f"{pass_type}_G_B_loss"] = 1
+        if f"{pass_type}_D_A_loss" not in self.track:
+            self.track[f"{pass_type}_D_A_loss"] = []
+            self.key_index[f"{pass_type}_D_A_loss"] = 2
+        if f"{pass_type}_D_B_loss" not in self.track:
+            self.track[f"{pass_type}_D_B_loss"] = []
+            self.key_index[f"{pass_type}_D_B_loss"] = 3
+        for i, name in enumerate(net._metrics.keys(), start=4):
+            if f"{pass_type}_{name}" not in self.track:
+                self.track[f"{pass_type}_{name}"] = []
+                self.key_index[f"{pass_type}_{name}"] = i
+
+    def on_fit_begin(self, net):
+        self.session += 1
+        self.num_metrics = len(net._metrics) + 4  # 2 generators, 2 discriminators
+        self.init_track(net, "train")
+        if net._validate:
+            self.init_track(net, "val")
+        session_start = len(self.track[next(iter(self.track))]) + 1  # new session starts at epoch = len(first_key) + 1
+        self.sessions.append(session_start)  
+
+    def on_train_epoch_begin(self, net):
+        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics, this is possible because dict keys are ordered in Python 3.7
+
+    def on_val_epoch_begin(self, net):
+        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics
+
+    def on_train_epoch_end(self, net):
+        self._save_metrics(net)
+
+    def on_val_epoch_end(self, net):
+        self._save_metrics(net)
+
+    def _save_metrics(self, net):
+        self.epoch_metrics = self.epoch_metrics / net._num_batches
+        self.track[f"{net._pass_type}_G_A_loss"].append(self.epoch_metrics[0])
+        self.track[f"{net._pass_type}_G_B_loss"].append(self.epoch_metrics[1])
+        self.track[f"{net._pass_type}_D_A_loss"].append(self.epoch_metrics[2])
+        self.track[f"{net._pass_type}_D_B_loss"].append(self.epoch_metrics[3])
+        for i, name in enumerate(net._metrics.keys(), start=4):
+            self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
+
+    def on_train_batch_end(self, net):
+        self._calculate_metrics(net)
+
+    def on_val_batch_end(self, net):
+        self._calculate_metrics(net)
+
+    def _calculate_metrics(self, net: "psk.NeuralNetwork"):
+        batch_out = to_safe_tensor(net._batch_out)
+        _, batch_y = net.unpack_fit_batch(net._batch_data)
+        self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]
+        for i, metric in enumerate(net._metrics.values(), start=4):
             self.epoch_metrics[i] += metric(batch_out, batch_y)
 
 
@@ -129,7 +203,7 @@ class Verbose(Callback):
         return {}
 
     def on_fit_begin(self, net):
-        try: self.prev_epochs = len(net.history.track["train_loss"])
+        try: self.prev_epochs = len(net.history.track[next(iter(net.history.track))])
         except: pass
 
     def on_train_epoch_begin(self, net):
@@ -155,7 +229,7 @@ class Verbose(Callback):
 
     def _print(self, net):
         # Calculate data
-        epoch_metrics = net.cbmanager.history.epoch_metrics / net._batch  # mean batch loss
+        epoch_metrics = net.history.epoch_metrics / net._batch  # mean batch loss
         if self.verbose >= 4:
             self.end_time = time.perf_counter()
             self.total_time = self.end_time - self.start_time
@@ -207,7 +281,7 @@ class LossPlot(Callback):
         self.switch_qt5()
         plt.ion()  # turn on interactive mode
 
-        num_metrics = net.cbmanager.history.num_metrics
+        num_metrics = net.history.num_metrics
         nrows = int(np.ceil(num_metrics / self.max_col))
 
         self.fig, self.axes = plt.subplots(nrows, self.max_col, sharex="all", squeeze=False, **self.figure_kw)
@@ -243,7 +317,7 @@ class LossPlot(Callback):
         self.plot_metrics(net)
 
     def plot_metrics(self, net):
-        track = net.cbmanager.history.track
+        track = net.history.track
         line_idx = 0 if net._pass_type == "train" else 1
 
         # Change plot for loss line
@@ -358,7 +432,7 @@ class WeightCheckpoint(Callback):
             self._track(net)
 
     def _track(self, net):
-        track = net.cbmanager.history.track
+        track = net.history.track
         new_record = track[self._tally.recorded][-1]
         self._tally.evaluate_record(new_record=new_record,
                                     best_epoch=net._epoch,
@@ -423,7 +497,7 @@ class EarlyStopping(Callback):
             self._track(net)
 
     def _track(self, net):
-        track = net.cbmanager.history.track
+        track = net.history.track
         new_record = track[self._tally.recorded][-1]
         is_better_record = self._tally.is_better_record(new_record)
 
@@ -673,7 +747,7 @@ class Tracker(Callback):
             self._track(net)
 
     def _track(self, net):
-        track = net.cbmanager.history.track
+        track = net.history.track
         self._tally.evaluate_record(track[self._tally.recorded][-1], best_epoch=net._epoch)
 
 

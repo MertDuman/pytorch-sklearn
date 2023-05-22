@@ -10,12 +10,13 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.optimizer import Optimizer as _Optimizer
 from torch.utils.data import DataLoader, Dataset
 
-from pytorch_sklearn.callbacks import CallbackManager, Callback
+from pytorch_sklearn.callbacks import Callback
+from pytorch_sklearn.callbacks.predefined import History
 from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
 
-from typing import Any, Callable, Iterable, Mapping, Optional, Union
+from typing import Any, Callable, Iterable, Sequence, Mapping, Optional, Union
 
 
 """
@@ -37,12 +38,12 @@ class NeuralNetwork:
         self.module = module  # SAVED
         self.optimizer = optimizer  # SAVED
         self.criterion = criterion  # SAVED
-        self.cbmanager = CallbackManager()  # SAVED
-        self.keep_training = True
 
         # Maintenance parameters
+        self._callbacks: Sequence[Callback] = [History()]  # SAVED
         self._using_original = True  # SAVED
         self._original_state_dict: Optional[Mapping[str, Any]] # SAVED
+        self.keep_training = True
 
         # Fit function parameters
         self._train_X: Union[torch.Tensor, DataLoader, Dataset]
@@ -54,7 +55,6 @@ class NeuralNetwork:
         self._batch_size: int
         self._use_cuda: bool
         self._fits_gpu: bool
-        self._callbacks: Iterable[Callback]
         self._metrics: Mapping[str, Callable]
 
         # Fit runtime parameters
@@ -94,12 +94,21 @@ class NeuralNetwork:
         self._batch_data: Any
 
     @property
-    def callbacks(self):
-        return self.cbmanager.callbacks
-
+    def history(self) -> History:
+        assert isinstance(self.callbacks[0], History)
+        return self.callbacks[0]
+    
     @property
-    def history(self):
-        return self.cbmanager.history
+    def callbacks(self):
+        return self._callbacks
+    
+    @callbacks.setter
+    def callbacks(self, callbacks: Sequence[Callback]):
+        if not isinstance(callbacks[0], History):
+            self._callbacks = [self._callbacks[0]]  # Keep history callback.
+            self._callbacks.extend(callbacks)
+        else:
+            self._callbacks = callbacks
         
     def zero_grad(self, optimizer: _Optimizer):
         optimizer.zero_grad(set_to_none=True)
@@ -142,12 +151,12 @@ class NeuralNetwork:
         batch_size: int = 32,
         use_cuda: bool = True,
         fits_gpu: bool = False,
-        callbacks: Optional[Iterable[Callback]] = None,
+        callbacks: Optional[Sequence[Callback]] = None,
         metrics: Optional[Mapping[str, Callable]] = None,
     ):
         # Handle None inputs.
-        # Assume cbmanager has callbacks. If not, then set as empty array.
-        callbacks = self.cbmanager._callbacks if callbacks is None else callbacks
+        # Assume we have callbacks. If not, then set as empty array.
+        callbacks = self.callbacks if callbacks is None else callbacks
         callbacks = [] if callbacks is None else callbacks
         metrics = {} if metrics is None else metrics
         device = "cuda" if use_cuda else "cpu"
@@ -161,10 +170,11 @@ class NeuralNetwork:
 
         #  Set fit class parameters
         fit_params = locals().copy()
+        fit_params.pop("callbacks")
         set_properties_hidden(**fit_params)
 
-        # Handle CallbackManager
-        self.cbmanager.callbacks = callbacks
+        # Handle Callbacks
+        self.callbacks = callbacks
 
         # Define DataLoaders
         self._train_X = self._to_tensor(self._train_X)
@@ -175,10 +185,7 @@ class NeuralNetwork:
             self._val_y = self._to_tensor(self._val_y) # type: ignore
             self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False) # type: ignore
 
-        self.fit_impl()
-
-    def fit_impl(self):
-        self.module = self.module.to(self._device)
+        self.to_device()
         self._notify("on_fit_begin")
         self._epoch = 1
         while self._epoch < self._max_epochs + 1:
@@ -268,7 +275,7 @@ class NeuralNetwork:
         self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
-            self.module = self.module.to(self._device)
+            self.to_device()
             self.test()
             self._notify("on_predict_begin")
             self._pred_y = []
@@ -311,7 +318,7 @@ class NeuralNetwork:
         self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
-            self.module = self.module.to(self._device)
+            self.to_device()
             self.test()
             self._notify("on_predict_begin")
             for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
@@ -330,6 +337,7 @@ class NeuralNetwork:
             Batch data as returned by the dataloader provided to ``predict`` or ``predict_generator``.
         decision_func : Optional[Callable]
             Decision function passed to ``predict`` or ``predict_generator``.. If None, the output of the model is returned.
+            Takes model output as input and returns the desired output.
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
@@ -382,7 +390,7 @@ class NeuralNetwork:
         self._score_loader = self.get_dataloader(self._test_X, self._test_y, shuffle=False) # type: ignore
 
         with torch.no_grad():
-            self.module = self.module.to(self._device)
+            self.to_device()
             self.test()
             self._score = []
             for self._batch, self._batch_data in enumerate(self._score_loader, start=1):
@@ -392,11 +400,11 @@ class NeuralNetwork:
             self._score = torch.tensor(np.stack(self._score)).float().mean(dim=0)
         return self._score
     
-    def score_batch(self, batch_data: Any, score_func: Optional[Callable] = None, **score_func_kw):
+    def score_batch(self, batch_data, score_func: Optional[Callable[[Any, Any], Any]] = None, **score_func_kw):
         ''' Compute and return the score for a batch. This method should be overridden by subclasses.
         
         The default implementation assumes that ``batch_data`` is a tuple of tensors ``(X, y)``.
-        If ``score_func`` is None, score is computed using the criterion, model output, and target ``y``.
+        If ``score_func`` is None, score is the model loss.
 
         Parameters
         ----------
@@ -404,10 +412,11 @@ class NeuralNetwork:
             Batch data as returned by the dataloader provided to ``score``.
         score_func : Optional[Callable]
             Score function passed to ``score``. If None, the criterion is used by default.
+            Takes a tuple of tensors ``(y_pred, y_true)`` as input and returns a scalar, tuple of scalars, tensor, or tuple of tensors.
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        X, y = batch_data
+        X, y = self.unpack_score_batch(batch_data)
         X = X.to(self._device, non_blocking=True)
         y = y.to(self._device, non_blocking=True)
         out = self.module(X)
@@ -436,7 +445,7 @@ class NeuralNetwork:
         return DataLoader(dataset, batch_size=self._batch_size, shuffle=shuffle, num_workers=0, pin_memory=not X.is_cuda)
 
     def _notify(self, method_name, **cb_kwargs):
-        for callback in self.cbmanager.callbacks:
+        for callback in self.callbacks:
             if method_name in callback.__class__.__dict__:  # check if method is overridden
                 getattr(callback, method_name)(self, **cb_kwargs)
 
@@ -449,6 +458,11 @@ class NeuralNetwork:
 
     def _to_safe_tensor(self, X):
         return to_safe_tensor(X, clone=False)
+    
+    def to_device(self):
+        self.module = self.module.to(self._device)
+        if isinstance(self.criterion, torch.nn.Module):
+            self.criterion = self.criterion.to(self._device)
 
     def load_weights(self, weight_checkpoint):
         if self._using_original:
@@ -510,14 +524,14 @@ class NeuralNetwork:
             torch.save(d, f)
 
     @classmethod
-    def load_class(cls, net: "NeuralNetwork", callbacks: Iterable[Callback], loadpath: str):
+    def load_class(cls, net: "NeuralNetwork", callbacks: Sequence[Callback], loadpath: str):
         with open(loadpath, "rb") as f:
             if torch.cuda.is_available():
                 d = torch.load(f)
             else:
                 d = torch.load(f, map_location=torch.device("cpu"))
         net.load_state_dict(d["net_state"])
-        net.cbmanager.callbacks = callbacks
+        net.callbacks = callbacks
         for i, callback in enumerate(net.callbacks):
             try:
                 callback.load_state_dict(d["callbacks"][i])
