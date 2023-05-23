@@ -14,7 +14,7 @@ from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.callbacks.predefined import History
 from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
-from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs
+from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, create_dirs, stack_if_list_of_list
 
 from typing import Any, Callable, Iterable, Sequence, Mapping, Optional, Union
 
@@ -42,7 +42,7 @@ class NeuralNetwork:
         # Maintenance parameters
         self._callbacks: Sequence[Callback] = [History()]  # SAVED
         self._using_original = True  # SAVED
-        self._original_state_dict: Optional[Mapping[str, Any]] # SAVED
+        self._original_state_dict: Optional[Mapping[str, Any]] = None # SAVED
         self.keep_training = True
 
         # Fit function parameters
@@ -104,8 +104,10 @@ class NeuralNetwork:
     
     @callbacks.setter
     def callbacks(self, callbacks: Sequence[Callback]):
-        if not isinstance(callbacks[0], History):
-            self._callbacks = [self._callbacks[0]]  # Keep history callback.
+        if len(callbacks) == 0:
+            self._callbacks = [self._callbacks[0]]  # Keep history.
+        elif not isinstance(callbacks[0], History):
+            self._callbacks = [self._callbacks[0]]  # Keep history.
             self._callbacks.extend(callbacks)
         else:
             self._callbacks = callbacks
@@ -185,7 +187,7 @@ class NeuralNetwork:
             self._val_y = self._to_tensor(self._val_y) # type: ignore
             self._val_loader = self.get_dataloader(self._val_X, self._val_y, shuffle=False) # type: ignore
 
-        self.to_device()
+        self.to_device(self._device)
         self._notify("on_fit_begin")
         self._epoch = 1
         while self._epoch < self._max_epochs + 1:
@@ -275,14 +277,14 @@ class NeuralNetwork:
         self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
-            self.to_device()
+            self.to_device(self._device)
             self.test()
             self._notify("on_predict_begin")
             self._pred_y = []
             for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
                 pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 self._pred_y.append(pred_y)
-            self._pred_y = torch.cat(self._pred_y)
+            self._pred_y = stack_if_list_of_list(self._pred_y)
             self._notify("on_predict_end")
         return self._pred_y
 
@@ -318,7 +320,7 @@ class NeuralNetwork:
         self._predict_loader = self.get_dataloader(self._test_X, None, shuffle=False)
 
         with torch.no_grad():
-            self.to_device()
+            self.to_device(self._device)
             self.test()
             self._notify("on_predict_begin")
             for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
@@ -390,7 +392,7 @@ class NeuralNetwork:
         self._score_loader = self.get_dataloader(self._test_X, self._test_y, shuffle=False) # type: ignore
 
         with torch.no_grad():
-            self.to_device()
+            self.to_device(self._device)
             self.test()
             self._score = []
             for self._batch, self._batch_data in enumerate(self._score_loader, start=1):
@@ -459,29 +461,29 @@ class NeuralNetwork:
     def _to_safe_tensor(self, X):
         return to_safe_tensor(X, clone=False)
     
-    def to_device(self):
-        self.module = self.module.to(self._device)
+    def to_device(self, device):
+        self.module = self.module.to(device)
         if isinstance(self.criterion, torch.nn.Module):
-            self.criterion = self.criterion.to(self._device)
+            self.criterion = self.criterion.to(device)
 
     def load_weights(self, weight_checkpoint):
         if self._using_original:
-            self._original_state_dict = copy.deepcopy(self.module.state_dict())
-        self.module.load_state_dict(weight_checkpoint.best_weights)
+            self._original_state_dict = copy.deepcopy(self.get_module_weights())
+        self.load_module_weights(weight_checkpoint.best_weights)
         self._using_original = False
 
     def load_weights_from_path(self, weight_path):
         if self._using_original:
-            self._original_state_dict = copy.deepcopy(self.module.state_dict())
+            self._original_state_dict = copy.deepcopy(self.get_module_weights())
         if torch.cuda.is_available():
-            self.module.load_state_dict(torch.load(weight_path))
+            self.load_module_weights(torch.load(weight_path))
         else:
-            self.module.load_state_dict(torch.load(weight_path, map_location=torch.device("cpu")))
+            self.load_module_weights(torch.load(weight_path, map_location=torch.device("cpu")))
         self._using_original = False
 
     def load_original_weights(self):
         if not self._using_original and self._original_state_dict is not None:  # second condition is always true, but there for type checking.
-            self.module.load_state_dict(self._original_state_dict)
+            self.load_module_weights(self._original_state_dict)
             self._using_original = True
             self._original_state_dict = None
 
@@ -489,9 +491,15 @@ class NeuralNetwork:
         self._using_original = True
         self._original_state_dict = None
 
+    def get_module_weights(self):
+        return self.module.state_dict()
+    
+    def load_module_weights(self, state_dict):
+        self.module.load_state_dict(state_dict)
+
     def state_dict(self):
         return {
-            "module_state": self.module.state_dict(),
+            "module_state": self.get_module_weights(),
             "original_module_state": self._original_state_dict,
             "using_original": self._using_original,
             "optimizer_state": self.optimizer.state_dict(),
@@ -501,7 +509,11 @@ class NeuralNetwork:
         }
 
     def load_state_dict(self, state_dict):
-        self.module.load_state_dict(state_dict["module_state"])
+        # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
+        checkpoint_device = state_dict["module_state"][next(iter(state_dict["module_state"]))].device
+        self.to_device(checkpoint_device)
+        
+        self.load_module_weights(state_dict["module_state"])
         self._original_state_dict = state_dict["original_module_state"]
         self._using_original = state_dict["using_original"]
         self.optimizer.load_state_dict(state_dict["optimizer_state"])

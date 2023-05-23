@@ -76,6 +76,7 @@ class CycleGAN(NeuralNetwork):
         # Maintenance parameters
         self._callbacks: Sequence[Callback] = [CycleGANHistory()]  # SAVED
         self._using_original = True  # SAVED
+        self._original_state_dict: Optional[Mapping[str, Any]] = None # SAVED
         self.keep_training = True
 
     @property
@@ -186,11 +187,13 @@ class CycleGAN(NeuralNetwork):
         A, B = batch_data
         return [], [A, B]
 
-    def predict_batch(self, batch_data):
+    def predict_batch(self, batch_data, decision_func: Optional[Callable] = None, **decision_func_kw):
         ''' Compute and return the output for a batch. This method should be overridden by subclasses.
         
         The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)`` and that the model
         outputs a 4-tuple ``(A2B, B2A, A2B2A, B2A2B)``.
+
+        NOTE! decision_func is not used in this implementation.
                 
         Parameters
         ----------
@@ -278,7 +281,7 @@ class CycleGAN(NeuralNetwork):
 
             D_loss = D_A_loss + D_B_loss
 
-            score = (G_loss, D_loss)
+            score = (G_loss.item(), D_loss.item())
         else:
             score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B]), **score_func_kw)
         return score
@@ -288,11 +291,11 @@ class CycleGAN(NeuralNetwork):
         A, B = batch_data
         return [], [A, B]
     
-    def to_device(self):
-        self.G_A = self.G_A.to(self._device)
-        self.G_B = self.G_B.to(self._device)
-        self.D_A = self.D_A.to(self._device)
-        self.D_B = self.D_B.to(self._device)
+    def to_device(self, device):
+        self.G_A = self.G_A.to(device)
+        self.G_B = self.G_B.to(device)
+        self.D_A = self.D_A.to(device)
+        self.D_B = self.D_B.to(device)
 
     def build_criterion(self, criterion: str):
         """
@@ -346,3 +349,41 @@ class CycleGAN(NeuralNetwork):
         self.D_A.eval()
         self.D_B.eval()
         self._pass_type = "test"
+
+    def get_module_weights(self):
+        return {
+            "G_A_state": self.G_A.state_dict(),
+            "G_B_state": self.G_B.state_dict(),
+            "D_A_state": self.D_A.state_dict(),
+            "D_B_state": self.D_B.state_dict()
+        }
+    
+    def load_module_weights(self, state_dict):
+        # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
+        checkpoint_device = state_dict["G_A_state"][next(iter(state_dict["G_A_state"]))].device
+        self.to_device(checkpoint_device)
+
+        self.G_A.load_state_dict(state_dict["G_A_state"])
+        self.G_B.load_state_dict(state_dict["G_B_state"])
+        self.D_A.load_state_dict(state_dict["D_A_state"])
+        self.D_B.load_state_dict(state_dict["D_B_state"])
+
+    def state_dict(self):
+        return {
+            **self.get_module_weights(),
+            "original_module_state": self._original_state_dict,
+            "using_original": self._using_original,
+            "G_optim_state": self.G_optim.state_dict(),
+            "D_optim_state": self.D_optim.state_dict(),
+            "epoch": self._epoch,
+            "batch": self._batch
+        }
+
+    def load_state_dict(self, state_dict):
+        self.load_module_weights(state_dict)
+        self._original_state_dict = state_dict["original_module_state"]
+        self._using_original = state_dict["using_original"]
+        self.G_optim.load_state_dict(state_dict["G_optim_state"])
+        self.D_optim.load_state_dict(state_dict["D_optim_state"])
+        self._epoch = state_dict["epoch"]
+        self._batch = state_dict["batch"]

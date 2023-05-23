@@ -11,6 +11,57 @@ def create_dirs(path):
         os.makedirs(dirs)
 
 
+def stack_if_list_of_list(arr):
+    ''' 
+    If arr is a list of list, combine them column-wise. Assumes the first dimension is the batch dimension for tensors.
+    
+    E.g. arr = [[5, torch.randn(1,2,1,1), [2, 3]],
+                [6, torch.randn(1,2,1,1), [4, 5]]]
+         Then this function returns 
+               [torch.tensor([5, 6]), torch.cat([el[1] for el in arr]), torch.tensor([[2, 3], [4, 5]])]
+
+    Otherwise, just returns torch.cat(arr).
+    '''
+    if isinstance(arr[0], (list, tuple)):
+        ret = []
+        for col in zip(*arr):
+            if isinstance(col[0], torch.Tensor):
+                ret.append(torch.cat(col, dim=0))
+            else:
+                ret.append(torch.tensor(np.stack(col)))
+        return ret
+    else:
+        return torch.cat(arr)
+    
+
+def optimizer_to(optimizer, device):
+    '''
+    Rough workaround for PyTorch not having a .to() method for optimizers.
+
+    Optimizers do not move their parameters when their module moves to a different device. PyTorch currently solves this by
+    initializing the optimizer on the first call to ``.step()``, so it knows about the module's device. 
+    However, if the module and the optimizer are loaded from a checkpoint, then there is no first call to ``.step()``.
+
+    When loading a checkpoint in PyTorch, it doesn't matter where the checkpoint was saved. The checkpoint will be loaded
+    to the device that the module is currently on. The optimizer ALSO loads to the device that the MODULE is currently on.
+    
+    If you create the module, create the optimizer, load the checkpoint, and then move the module to a different device,
+    the optimizer will still be on the original device. Since the optimizer will not perform the first call to ``.step()``
+    (because it resumes from a checkpoint), it will not know about the module's new device.
+
+    The correct way to go about this is to create the module, move the module, create the optimizer, load the checkpoints.
+    Now, the checkpoint will load to the module's device, and the optimizer will be initialized on the module's device.
+
+    Another way would be to create the module, create the optimizer, MOVE the module to the checkpoint's device, load the checkpoints.
+
+    These may not always be possible (or easy), so this function is a workaround.
+    '''
+    for param in optimizer.state.values():
+        for key, value in param.items():
+            if isinstance(value, torch.Tensor):
+                param[key] = value.to(device)
+
+
 def to_numpy(X: torch.Tensor, clone=True):
     """
     Safely convert from PyTorch tensor to numpy.
