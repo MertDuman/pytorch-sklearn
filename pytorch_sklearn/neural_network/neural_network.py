@@ -495,6 +495,10 @@ class NeuralNetwork:
         return self.module.state_dict()
     
     def load_module_weights(self, state_dict):
+        # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
+        checkpoint_device = state_dict[next(iter(state_dict))].device
+        self.to_device(checkpoint_device)
+
         self.module.load_state_dict(state_dict)
 
     def state_dict(self):
@@ -509,10 +513,6 @@ class NeuralNetwork:
         }
 
     def load_state_dict(self, state_dict):
-        # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
-        checkpoint_device = state_dict["module_state"][next(iter(state_dict["module_state"]))].device
-        self.to_device(checkpoint_device)
-        
         self.load_module_weights(state_dict["module_state"])
         self._original_state_dict = state_dict["original_module_state"]
         self._using_original = state_dict["using_original"]

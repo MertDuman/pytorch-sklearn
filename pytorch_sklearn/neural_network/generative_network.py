@@ -48,7 +48,8 @@ class CycleGAN(NeuralNetwork):
         cycle_loss: str = "l1",
         identity_loss: str = "l1",
         lambda_cycle: float = 10.0,
-        lambda_identity: float = 5.0
+        lambda_identity: float = 5.0,
+        elo_training: bool = False,
     ):
         # Base parameters
         self.G_A = G_A
@@ -59,6 +60,7 @@ class CycleGAN(NeuralNetwork):
         self.D_optim = D_optim
         self.lambda_cycle = lambda_cycle
         self.lambda_identity = lambda_identity
+        self.elo_training = elo_training
         
         # Loss
         self.implemented_gan_losses = ["lsgan", "gan"]
@@ -78,6 +80,9 @@ class CycleGAN(NeuralNetwork):
         self._using_original = True  # SAVED
         self._original_state_dict: Optional[Mapping[str, Any]] = None # SAVED
         self.keep_training = True
+
+        self.G_elo = 0
+        self.D_elo = 0
 
     @property
     def history(self) -> CycleGANHistory:
@@ -144,7 +149,7 @@ class CycleGAN(NeuralNetwork):
 
         B2A_logits = self.D_A(B2A)
         A2B_logits = self.D_B(A2B)
-
+            
         # Generator loss
         A2B_g_loss = self.G_criterion(A2B_logits)
         B2A_g_loss = self.G_criterion(B2A_logits)
@@ -158,7 +163,8 @@ class CycleGAN(NeuralNetwork):
 
         G_loss = G_A_loss + G_B_loss
         
-        self.backward(G_loss, self.G_optim)
+        if not self.elo_training or self.G_elo <= self.D_elo:
+            self.backward(G_loss, self.G_optim)
 
         # Gradients past this point are not needed
         A2B = A2B.detach()
@@ -178,7 +184,28 @@ class CycleGAN(NeuralNetwork):
 
         D_loss = D_A_loss + D_B_loss
 
-        self.backward(D_loss, self.D_optim)
+        if not self.elo_training or self.G_elo >= self.D_elo:
+            self.backward(D_loss, self.D_optim)
+
+        if self.elo_training:
+            with torch.no_grad():
+                # Discriminator wants reals to be 1 and fakes to be 0
+                # These are all fakes.
+                A_preds = A_logits > 0.5  # Values above 0.5 get 1, meaning they are predicted as real. Since these are real, disc wants 1.
+                B_preds = B_logits > 0.5
+                B2A_preds = B2A_logits > 0.5  # Values above 0.5 get 1, meaning they are predicted as real. Since these are fake, disc wants 0.
+                A2B_preds = A2B_logits > 0.5
+
+                # Generator only rewarded for fooling discriminator
+                G_wins = (B2A_preds == 1).sum().item() + (A2B_preds == 1).sum().item()
+                G_losses = (B2A_preds == 0).sum().item() + (A2B_preds == 0).sum().item()
+
+                # Discriminator rewarded for spotting fakes, but penalized for missing reals
+                D_wins = (B2A_preds == 0).sum().item() + (A2B_preds == 0).sum().item()
+                D_losses = (A_preds == 0).sum().item() + (B_preds == 0).sum().item()
+
+                self.G_elo += (G_wins > 0) - (G_losses > 0)
+                self.D_elo += (D_wins > 0) - (D_losses > 0)
         
         return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
     
