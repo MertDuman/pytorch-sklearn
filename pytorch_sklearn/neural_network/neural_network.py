@@ -128,6 +128,33 @@ class NeuralNetwork:
         self._notify(f"on_grad_compute_end")
         self.step_grad(optimizer)
 
+    def forward(self, X):
+        ''' Forward pass of the model. This method should be overridden by subclasses. 
+
+        The default implementation simply calls the module.
+
+        Parameters
+        ----------
+        X : Any
+            All the data necessary for the model forward pass. By default, this is the first element returned from ``unpack_fit_batch``.
+        '''
+        return self.module(X)
+    
+    def compute_loss(self, out, y):
+        ''' Computes the loss of the model. This method should be overridden by subclasses.
+
+        The default implementation simply calls the criterion.
+        
+        Parameters
+        ----------
+        out : torch.Tensor
+            The output of the model. By default, this is the output of ``forward``.
+            
+        y : torch.Tensor
+            The target values. By default, this is the second element returned from ``unpack_fit_batch``.
+        '''
+        return self.criterion(out, y)
+
     # Model Modes
     def train(self):
         self.module.train()
@@ -218,6 +245,14 @@ class NeuralNetwork:
 
             self._notify(f"on_{self._pass_type}_batch_end")
         self._notify(f"on_{self._pass_type}_epoch_end")
+    
+    def unpack_fit_batch(self, batch_data):
+        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
+        This is a convenience method for subclasses that don't want to override ``fit_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
                        
     def fit_batch(self, batch_data):
         ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
@@ -233,17 +268,9 @@ class NeuralNetwork:
         X, y = self.unpack_fit_batch(batch_data)
         X = X.to(self._device, non_blocking=True)
         y = y.to(self._device, non_blocking=True)
-        out = self.module(X)
-        loss = self.criterion(out, y)
+        out = self.forward(X)
+        loss = self.compute_loss(out, y)
         return out, loss
-    
-    def unpack_fit_batch(self, batch_data):
-        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
-        
-        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
-        This is a convenience method for subclasses that don't want to override ``fit_batch`` but return many values in their dataloader.
-        '''
-        return batch_data
 
     def predict(
         self,
@@ -327,6 +354,14 @@ class NeuralNetwork:
                 self._pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 yield self._pred_y
             self._notify("on_predict_end")
+    
+    def unpack_predict_batch(self, batch_data):
+        ''' Unpacks batch data into X. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a single tensor.
+        This is a convenience method for subclasses that don't want to override ``predict_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
 
     def predict_batch(self, batch_data, decision_func: Optional[Callable] = None, **decision_func_kw):
         ''' Compute and return the output for a batch. This method should be overridden by subclasses.
@@ -345,18 +380,10 @@ class NeuralNetwork:
         '''
         X = self.unpack_predict_batch(batch_data)
         X = X.to(self._device, non_blocking=True)
-        out = self.module(X)
+        out = self.forward(X)
         if decision_func is not None:
             out = decision_func(out, **decision_func_kw)
         return out
-    
-    def unpack_predict_batch(self, batch_data):
-        ''' Unpacks batch data into X. This method should be overridden by subclasses. 
-        
-        The default implementation assumes that ``batch_data`` is a single tensor.
-        This is a convenience method for subclasses that don't want to override ``predict_batch`` but return many values in their dataloader.
-        '''
-        return batch_data
 
     def score(
         self,
@@ -402,6 +429,14 @@ class NeuralNetwork:
             self._score = torch.tensor(np.stack(self._score)).float().mean(dim=0)
         return self._score
     
+    def unpack_score_batch(self, batch_data):
+        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
+        This is a convenience method for subclasses that don't want to override ``score_batch`` but return many values in their dataloader.
+        '''
+        return batch_data
+    
     def score_batch(self, batch_data, score_func: Optional[Callable[[Any, Any], Any]] = None, **score_func_kw):
         ''' Compute and return the score for a batch. This method should be overridden by subclasses.
         
@@ -424,18 +459,10 @@ class NeuralNetwork:
         out = self.module(X)
         
         if score_func is None:
-            score = self.criterion(out, y).item()
+            score = self.compute_loss(out, y).item()
         else:
             score = score_func(self._to_safe_tensor(out), self._to_safe_tensor(y), **score_func_kw)
         return score
-    
-    def unpack_score_batch(self, batch_data):
-        ''' Unpacks batch data into X and y. This method should be overridden by subclasses. 
-        
-        The default implementation assumes that ``batch_data`` is a tuple of ``(X, y)`` and returns ``X`` and ``y``.
-        This is a convenience method for subclasses that don't want to override ``score_batch`` but return many values in their dataloader.
-        '''
-        return batch_data
 
     def get_dataloader(self, X: Union[torch.Tensor, Dataset, DataLoader], y: Optional[torch.Tensor], shuffle):
         ''' Return a dataloader for the given X and y. Handles the cases where X is a DataLoader, Dataset, or Tensor. '''

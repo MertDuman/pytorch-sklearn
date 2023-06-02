@@ -124,7 +124,22 @@ class CycleGAN(NeuralNetwork):
 
             self._notify(f"on_{self._pass_type}_batch_end")
         self._notify(f"on_{self._pass_type}_epoch_end")
-
+    
+    def unpack_fit_batch(self, batch_data):
+        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
+        A, B = batch_data
+        return [], [A, B]
+    
+    def forward(self, X):
+        A, B = X
+        A2B = self.G_A(A)
+        B2A = self.G_B(B)
+        A2B2A = self.G_B(A2B)
+        B2A2B = self.G_A(B2A)
+        A2A = self.G_B(A)
+        B2B = self.G_A(B)
+        return A2B, B2A, A2B2A, B2A2B, A2A, B2B
+    
     def fit_batch(self, batch_data):
         ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
             
@@ -140,12 +155,7 @@ class CycleGAN(NeuralNetwork):
         A = A.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
 
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
-        A2A = self.G_B(A)
-        B2B = self.G_A(B)
+        A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
 
         B2A_logits = self.D_A(B2A)
         A2B_logits = self.D_B(A2B)
@@ -209,7 +219,7 @@ class CycleGAN(NeuralNetwork):
         
         return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
     
-    def unpack_fit_batch(self, batch_data):
+    def unpack_predict_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
         A, B = batch_data
         return [], [A, B]
@@ -235,13 +245,10 @@ class CycleGAN(NeuralNetwork):
         A = A.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
 
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
+        A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
         return [A2B, B2A, A2B2A, B2A2B]
     
-    def unpack_predict_batch(self, batch_data):
+    def unpack_score_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
         A, B = batch_data
         return [], [A, B]
@@ -266,12 +273,7 @@ class CycleGAN(NeuralNetwork):
         A = A.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
 
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
-        A2A = self.G_B(A)
-        B2B = self.G_A(B)
+        A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
 
         if score_func is None:
             B2A_logits = self.D_A(B2A)
@@ -312,11 +314,6 @@ class CycleGAN(NeuralNetwork):
         else:
             score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B]), **score_func_kw)
         return score
-    
-    def unpack_score_batch(self, batch_data):
-        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
-        A, B = batch_data
-        return [], [A, B]
     
     def to_device(self, device):
         self.G_A = self.G_A.to(device)
@@ -414,3 +411,215 @@ class CycleGAN(NeuralNetwork):
         self.D_optim.load_state_dict(state_dict["D_optim_state"])
         self._epoch = state_dict["epoch"]
         self._batch = state_dict["batch"]
+
+
+
+class R2CGAN(CycleGAN):
+    """
+    Implements CycleGAN from the paper: https://arxiv.org/abs/2209.14770
+    Follows similar implementation to: https://github.com/meteahishali/R2C-GAN
+
+    Parameters
+    ----------
+    generator_A : PyTorch module
+        Generator that tries to convert class A to class B
+    generator_B : PyTorch module
+        Generator that tries to convert class B to class A
+    discriminator_A : PyTorch module
+        Discriminator that classifies input as "from class A" or "not from class A"
+    discriminator_B : PyTorch module
+        Discriminator that classifies input as "from class B" or "not from class B"
+    optimizer_Gen : PyTorch optimizer
+        Updates the weights of the generators.
+    optimizer_Disc : PyTorch optimizer
+        Updates the weights of the discriminators.
+    criterion : PyTorch loss
+        GAN loss that will be applied to discriminator outputs.
+    """
+    def __init__(
+        self, 
+        G_A: nn.Module, G_B: nn.Module, 
+        D_A: nn.Module, D_B: nn.Module, 
+        G_optim: _Optimizer, D_optim: _Optimizer,
+        criterion: str = "lsgan",
+        cycle_loss: str = "l1",
+        identity_loss: str = "l1",
+        lambda_cycle: float = 10.0,
+        lambda_identity: float = 5.0,
+    ):
+        super().__init__(
+            G_A, G_B, D_A, D_B, G_optim, D_optim, criterion, cycle_loss, identity_loss, lambda_cycle, lambda_identity, elo_training=False
+        )
+
+        self.classification_loss = nn.CrossEntropyLoss()
+
+    def unpack_fit_batch(self, batch_data):
+        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
+        A, yA, B, yB = batch_data
+        return [], [A, yA, B, yB]
+        
+    def fit_batch(self, batch_data):
+        ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
+            
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)`` and that the model
+        outputs ``A2B, B2A``. The loss is a 4-tuple of ``(G_A_loss, G_B_loss, D_A_loss, D_B_loss)``.
+
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``fit``.
+        '''
+        _, [A, yA, B, yB] = self.unpack_fit_batch(batch_data)
+        A = A.to(self._device, non_blocking=True)
+        yA = yA.to(self._device, non_blocking=True)
+        B = B.to(self._device, non_blocking=True)
+        yB = yB.to(self._device, non_blocking=True)
+
+        A2B, yA2B = self.G_A(A)
+        B2A, yB2A = self.G_B(B)
+        A2B2A, yA2B2A = self.G_B(A2B)
+        B2A2B, yB2A2B = self.G_A(B2A)
+        A2A, yA2A = self.G_B(A)
+        B2B, yB2B = self.G_A(B)
+
+        B2A_logits = self.D_A(B2A)
+        A2B_logits = self.D_B(A2B)
+            
+        # Generator loss
+        A2B_g_loss = self.G_criterion(A2B_logits)
+        B2A_g_loss = self.G_criterion(B2A_logits)
+        A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
+        B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
+        A2A_identity_loss = self.identity_loss(A2A, A)
+        B2B_identity_loss = self.identity_loss(B2B, B)
+
+        # Classification loss
+        A2B_c_loss = self.classification_loss(yA2B, yA)
+        A2B2A_c_loss = self.classification_loss(yA2B2A, yA)
+        A2A_c_loss = self.classification_loss(yA2A, yA)
+        B2A_c_loss = self.classification_loss(yB2A, yB)
+        B2A2B_c_loss = self.classification_loss(yB2A2B, yB)
+        B2B_c_loss = self.classification_loss(yB2B, yB)
+
+        G_A_loss = A2B_g_loss + 0.1 * A2B_c_loss + (A2B2A_cycle_loss + 0.01 * A2B2A_c_loss) * self.lambda_cycle + (A2A_identity_loss + 0.02 * A2A_c_loss) * self.lambda_identity
+        G_B_loss = B2A_g_loss + 0.1 * B2A_c_loss + (B2A2B_cycle_loss + 0.01 * B2A2B_c_loss) * self.lambda_cycle + (B2B_identity_loss + 0.02 * B2B_c_loss) * self.lambda_identity
+
+        G_loss = G_A_loss + G_B_loss
+        
+        self.backward(G_loss, self.G_optim)
+
+        # Gradients past this point are not needed
+        A2B = A2B.detach()
+        B2A = B2A.detach()
+
+        # Discriminator loss
+        A_logits = self.D_A(A)
+        B_logits = self.D_B(B)
+        B2A_d_logits = self.D_A(B2A)
+        A2B_d_logits = self.D_B(A2B)
+
+        A_d_loss, B2A_d_loss = self.D_criterion(A_logits, B2A_d_logits)
+        B_d_loss, A2B_d_loss = self.D_criterion(B_logits, A2B_d_logits)
+
+        D_A_loss = A_d_loss + B2A_d_loss
+        D_B_loss = B_d_loss + A2B_d_loss
+
+        D_loss = D_A_loss + D_B_loss
+
+        self.backward(D_loss, self.D_optim)
+        
+        return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
+
+    def predict_batch(self, batch_data, decision_func: Optional[Callable] = None, **decision_func_kw):
+        ''' Compute and return the output for a batch. This method should be overridden by subclasses.
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)`` and that the model
+        outputs a 4-tuple ``(A2B, B2A, A2B2A, B2A2B)``.
+
+        NOTE! decision_func is not used in this implementation.
+                
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``predict`` or ``predict_generator``.
+        decision_func : Optional[Callable]
+            Decision function passed to ``predict`` or ``predict_generator``.. If None, the output of the model is returned.
+        **decision_func_kw
+            Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
+        '''
+        _, [A, B] = self.unpack_predict_batch(batch_data)
+        A = A.to(self._device, non_blocking=True)
+        B = B.to(self._device, non_blocking=True)
+
+        A2B = self.G_A(A)
+        B2A = self.G_B(B)
+        A2B2A = self.G_B(A2B)
+        B2A2B = self.G_A(B2A)
+        return [A2B, B2A, A2B2A, B2A2B]
+        
+    def score_batch(self, batch_data, score_func: Optional[Callable[[Any], Any]] = None, **score_func_kw):
+        ''' Compute and return the score for a batch. This method should be overridden by subclasses.
+        
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)``.
+        If ``score_func`` is None, score is the model loss.
+
+        Parameters
+        ----------
+        batch_data : Any
+            Batch data as returned by the dataloader provided to ``score``.
+        score_func : Optional[Callable]
+            Score function passed to ``score``. If None, the criterion is used by default.
+            Takes a tuple of ``(A2B, B2A, A2B2A, B2A2B)`` as input, and returns either a scalar, tuple of scalars, tensor, or tuple of tensors.
+        **score_func_kw
+            Keyword arguments passed to ``score_func``, provided to ``score``.
+        '''
+        _, [A, B] = self.unpack_predict_batch(batch_data)
+        A = A.to(self._device, non_blocking=True)
+        B = B.to(self._device, non_blocking=True)
+
+        A2B = self.G_A(A)
+        B2A = self.G_B(B)
+        A2B2A = self.G_B(A2B)
+        B2A2B = self.G_A(B2A)
+        A2A = self.G_B(A)
+        B2B = self.G_A(B)
+
+        if score_func is None:
+            B2A_logits = self.D_A(B2A)
+            A2B_logits = self.D_B(A2B)
+
+            # Generator loss
+            A2B_g_loss = self.G_criterion(A2B_logits)
+            B2A_g_loss = self.G_criterion(B2A_logits)
+            A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
+            B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
+            A2A_identity_loss = self.identity_loss(A2A, A)
+            B2B_identity_loss = self.identity_loss(B2B, B)
+
+            G_A_loss = A2B_g_loss + A2B2A_cycle_loss * self.lambda_cycle + A2A_identity_loss * self.lambda_identity
+            G_B_loss = B2A_g_loss + B2A2B_cycle_loss * self.lambda_cycle + B2B_identity_loss * self.lambda_identity
+
+            G_loss = G_A_loss + G_B_loss
+
+            # Gradients past this point are not needed
+            A2B = A2B.detach()
+            B2A = B2A.detach()
+
+            # Discriminator loss
+            A_logits = self.D_A(A)
+            B_logits = self.D_B(B)
+            B2A_d_logits = self.D_A(B2A)
+            A2B_d_logits = self.D_B(A2B)
+
+            A_d_loss, B2A_d_loss = self.D_criterion(A_logits, B2A_d_logits)
+            B_d_loss, A2B_d_loss = self.D_criterion(B_logits, A2B_d_logits)
+
+            D_A_loss = A_d_loss + B2A_d_loss
+            D_B_loss = B_d_loss + A2B_d_loss
+
+            D_loss = D_A_loss + D_B_loss
+
+            score = (G_loss.item(), D_loss.item())
+        else:
+            score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B]), **score_func_kw)
+        return score
