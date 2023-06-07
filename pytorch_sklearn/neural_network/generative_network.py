@@ -269,7 +269,7 @@ class CycleGAN(NeuralNetwork):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        _, [A, B] = self.unpack_predict_batch(batch_data)
+        _, [A, B] = self.unpack_score_batch(batch_data)
         A = A.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
 
@@ -461,7 +461,7 @@ class R2CGAN(CycleGAN):
     def fit_batch(self, batch_data):
         ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
             
-        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)`` and that the model
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, yA, B, yB)`` and that the model
         outputs ``A2B, B2A``. The loss is a 4-tuple of ``(G_A_loss, G_B_loss, D_A_loss, D_B_loss)``.
 
         Parameters
@@ -530,10 +530,15 @@ class R2CGAN(CycleGAN):
         
         return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
 
+    def unpack_predict_batch(self, batch_data):
+        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
+        A, yA, B, yB = batch_data
+        return [], [A, yA, B, yB]
+
     def predict_batch(self, batch_data, decision_func: Optional[Callable] = None, **decision_func_kw):
         ''' Compute and return the output for a batch. This method should be overridden by subclasses.
         
-        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)`` and that the model
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, yA, B, yB)`` and that the model
         outputs a 4-tuple ``(A2B, B2A, A2B2A, B2A2B)``.
 
         NOTE! decision_func is not used in this implementation.
@@ -547,20 +552,27 @@ class R2CGAN(CycleGAN):
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
-        _, [A, B] = self.unpack_predict_batch(batch_data)
+        _, [A, yA, B, yB] = self.unpack_predict_batch(batch_data)
         A = A.to(self._device, non_blocking=True)
+        yA = yA.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
+        yB = yB.to(self._device, non_blocking=True)
 
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
+        A2B, yA2B = self.G_A(A)
+        B2A, yB2A = self.G_B(B)
+        A2B2A, yA2B2A = self.G_B(A2B)
+        B2A2B, yB2A2B = self.G_A(B2A)
         return [A2B, B2A, A2B2A, B2A2B]
+
+    def unpack_score_batch(self, batch_data):
+        ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
+        A, yA, B, yB = batch_data
+        return [], [A, yA, B, yB]
         
     def score_batch(self, batch_data, score_func: Optional[Callable[[Any], Any]] = None, **score_func_kw):
         ''' Compute and return the score for a batch. This method should be overridden by subclasses.
         
-        The default implementation assumes that ``batch_data`` is a tuple of ``(A, B)``.
+        The default implementation assumes that ``batch_data`` is a tuple of ``(A, yA, B, yB)``.
         If ``score_func`` is None, score is the model loss.
 
         Parameters
@@ -573,21 +585,23 @@ class R2CGAN(CycleGAN):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        _, [A, B] = self.unpack_predict_batch(batch_data)
+        _, [A, yA, B, yB] = self.unpack_score_batch(batch_data)
         A = A.to(self._device, non_blocking=True)
+        yA = yA.to(self._device, non_blocking=True)
         B = B.to(self._device, non_blocking=True)
+        yB = yB.to(self._device, non_blocking=True)
 
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
-        A2A = self.G_B(A)
-        B2B = self.G_A(B)
+        A2B, yA2B = self.G_A(A)
+        B2A, yB2A = self.G_B(B)
+        A2B2A, yA2B2A = self.G_B(A2B)
+        B2A2B, yB2A2B = self.G_A(B2A)
+        A2A, yA2A = self.G_B(A)
+        B2B, yB2B = self.G_A(B)
 
         if score_func is None:
             B2A_logits = self.D_A(B2A)
             A2B_logits = self.D_B(A2B)
-
+                
             # Generator loss
             A2B_g_loss = self.G_criterion(A2B_logits)
             B2A_g_loss = self.G_criterion(B2A_logits)
@@ -596,8 +610,16 @@ class R2CGAN(CycleGAN):
             A2A_identity_loss = self.identity_loss(A2A, A)
             B2B_identity_loss = self.identity_loss(B2B, B)
 
-            G_A_loss = A2B_g_loss + A2B2A_cycle_loss * self.lambda_cycle + A2A_identity_loss * self.lambda_identity
-            G_B_loss = B2A_g_loss + B2A2B_cycle_loss * self.lambda_cycle + B2B_identity_loss * self.lambda_identity
+            # Classification loss
+            A2B_c_loss = self.classification_loss(yA2B, yA)
+            A2B2A_c_loss = self.classification_loss(yA2B2A, yA)
+            A2A_c_loss = self.classification_loss(yA2A, yA)
+            B2A_c_loss = self.classification_loss(yB2A, yB)
+            B2A2B_c_loss = self.classification_loss(yB2A2B, yB)
+            B2B_c_loss = self.classification_loss(yB2B, yB)
+
+            G_A_loss = A2B_g_loss + 0.1 * A2B_c_loss + (A2B2A_cycle_loss + 0.01 * A2B2A_c_loss) * self.lambda_cycle + (A2A_identity_loss + 0.02 * A2A_c_loss) * self.lambda_identity
+            G_B_loss = B2A_g_loss + 0.1 * B2A_c_loss + (B2A2B_cycle_loss + 0.01 * B2A2B_c_loss) * self.lambda_cycle + (B2B_identity_loss + 0.02 * B2B_c_loss) * self.lambda_identity
 
             G_loss = G_A_loss + G_B_loss
 

@@ -43,7 +43,8 @@ def optimizer_to(optimizer, device):
     However, if the module and the optimizer are loaded from a checkpoint, then there is no first call to ``.step()``.
 
     When loading a checkpoint in PyTorch, it doesn't matter where the checkpoint was saved. The checkpoint will be loaded
-    to the device that the module is currently on. The optimizer ALSO loads to the device that the MODULE is currently on.
+    to the device that the module is currently on. The optimizer ALSO loads to the device that the MODULE is currently on,
+    i.e. when loading a checkpoint for the optimizer, PyTorch checks the device of the module and loads the optimizer to that.
     
     If you create the module, create the optimizer, load the checkpoint, and then move the module to a different device,
     the optimizer will still be on the original device. Since the optimizer will not perform the first call to ``.step()``
@@ -54,7 +55,9 @@ def optimizer_to(optimizer, device):
 
     Another way would be to create the module, create the optimizer, MOVE the module to the checkpoint's device, load the checkpoints.
 
-    These may not always be possible (or easy), so this function is a workaround.
+    These options may not always be possible (or easy), so this function is a workaround. It tries to move all parameters of the optimizer
+    to the given device. Note that since PyTorch does not have a ``.to()`` method for optimizers, this function is not guaranteed
+    to work.
     '''
     for param in optimizer.state.values():
         for key, value in param.items():
