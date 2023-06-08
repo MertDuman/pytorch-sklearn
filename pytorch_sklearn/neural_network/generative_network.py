@@ -114,6 +114,16 @@ class CycleGAN(NeuralNetwork):
             metrics=metrics,
         )
 
+    def forward(self, X):
+        A, B = X
+        A2B = self.G_A(A)
+        B2A = self.G_B(B)
+        A2B2A = self.G_B(A2B)
+        B2A2B = self.G_A(B2A)
+        A2A = self.G_B(A)
+        B2B = self.G_A(B)
+        return A2B, B2A, A2B2A, B2A2B, A2A, B2B
+
     def fit_epoch(self, data_loader):
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
@@ -129,16 +139,6 @@ class CycleGAN(NeuralNetwork):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
         A, B = batch_data
         return [], [A, B]
-    
-    def forward(self, X):
-        A, B = X
-        A2B = self.G_A(A)
-        B2A = self.G_B(B)
-        A2B2A = self.G_B(A2B)
-        B2A2B = self.G_A(B2A)
-        A2A = self.G_B(A)
-        B2B = self.G_A(B)
-        return A2B, B2A, A2B2A, B2A2B, A2A, B2B
     
     def fit_batch(self, batch_data):
         ''' Compute and return the output and loss for a batch. This method should be overridden by subclasses.
@@ -246,7 +246,7 @@ class CycleGAN(NeuralNetwork):
         B = B.to(self._device, non_blocking=True)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
-        return [A2B, B2A, A2B2A, B2A2B]
+        return [A2B, B2A, A2B2A, B2A2B, A2A, B2B]
     
     def unpack_score_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -310,9 +310,9 @@ class CycleGAN(NeuralNetwork):
 
             D_loss = D_A_loss + D_B_loss
 
-            score = (G_loss.item(), D_loss.item())
+            score = [G_A_loss.item(), G_B_loss.item(), D_A_loss.item(), D_B_loss.item()]
         else:
-            score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B]), **score_func_kw)
+            score = score_func(self._to_safe_tensor([A, B, A2B, B2A, A2B2A, B2A2B, A2A, B2B]), **score_func_kw)
         return score
     
     def to_device(self, device):
@@ -562,7 +562,9 @@ class R2CGAN(CycleGAN):
         B2A, yB2A = self.G_B(B)
         A2B2A, yA2B2A = self.G_B(A2B)
         B2A2B, yB2A2B = self.G_A(B2A)
-        return [A2B, B2A, A2B2A, B2A2B]
+        A2A, yA2A = self.G_B(A)
+        B2B, yB2B = self.G_A(B)
+        return [A2B, B2A, A2B2A, B2A2B, A2A, B2B]
 
     def unpack_score_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -641,7 +643,7 @@ class R2CGAN(CycleGAN):
 
             D_loss = D_A_loss + D_B_loss
 
-            score = (G_loss.item(), D_loss.item())
+            score = [G_A_loss.item(), G_B_loss.item(), D_A_loss.item(), D_B_loss.item()]
         else:
-            score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B]), **score_func_kw)
+            score = score_func(self._to_safe_tensor([A, B, A2B, B2A, A2B2A, B2A2B, A2A, B2B]), **score_func_kw)
         return score

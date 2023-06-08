@@ -431,12 +431,12 @@ class WeightCheckpoint(Callback):
         if net._validate:
             self._track(net)
 
-    def _track(self, net):
+    def _track(self, net: "psk.NeuralNetwork"):
         track = net.history.track
         new_record = track[self._tally.recorded][-1]
         self._tally.evaluate_record(new_record=new_record,
                                     best_epoch=net._epoch,
-                                    best_weights=copy.deepcopy(net.module.state_dict()))
+                                    best_weights=copy.deepcopy(net.get_module_weights()))
         if self.save_per_epoch:
             self._save_weights(False)
 
@@ -496,7 +496,7 @@ class EarlyStopping(Callback):
         if net._validate:
             self._track(net)
 
-    def _track(self, net):
+    def _track(self, net: "psk.NeuralNetwork"):
         track = net.history.track
         new_record = track[self._tally.recorded][-1]
         is_better_record = self._tally.is_better_record(new_record)
@@ -504,7 +504,7 @@ class EarlyStopping(Callback):
         if is_better_record:
             self._tally.evaluate_record(new_record=new_record,
                                         best_epoch=net._epoch,
-                                        best_weights=copy.deepcopy(net.module.state_dict()))
+                                        best_weights=copy.deepcopy(net.get_module_weights()))
 
             self.current_patience = 0
         else:
