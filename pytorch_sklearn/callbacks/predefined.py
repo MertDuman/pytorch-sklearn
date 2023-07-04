@@ -667,6 +667,12 @@ class ImageOutputWriter(Callback):
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
 
+    def state_dict(self):
+        return {}
+
+    def load_state_dict(self, state_dict: dict):
+        pass
+
     def identity(self, x):
         return x
 

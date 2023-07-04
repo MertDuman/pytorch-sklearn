@@ -282,14 +282,9 @@ class NeuralNetwork:
         **decision_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else self._batch_size
-        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
-        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
-
-        # These asserts will trigger if predict is called before calling fit and not passing these parameters.
-        assert batch_size is not None, "Batch size is not set."
-        assert use_cuda is not None, "Device is not set."
-        assert fits_gpu is not None, "fits_gpu is not set."
+        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:
@@ -325,14 +320,9 @@ class NeuralNetwork:
         **decision_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else self._batch_size
-        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
-        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
-
-        # These asserts will trigger if predict is called before calling fit and not passing these parameters.
-        assert batch_size is not None, "Batch size is not set."
-        assert use_cuda is not None, "Device is not set."
-        assert fits_gpu is not None, "fits_gpu is not set."
+        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:
@@ -396,14 +386,9 @@ class NeuralNetwork:
         **score_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else self._batch_size
-        use_cuda = use_cuda if use_cuda is not None else self._use_cuda
-        fits_gpu = fits_gpu if fits_gpu is not None else self._fits_gpu
-
-        # These asserts will trigger if score is called before calling fit and not passing these parameters.
-        assert batch_size is not None, "Batch size is not set."
-        assert use_cuda is not None, "Device is not set."
-        assert fits_gpu is not None, "fits_gpu is not set."
+        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:

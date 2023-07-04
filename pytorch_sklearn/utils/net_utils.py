@@ -22,6 +22,7 @@ def try_load_network_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
+    net_class: NeuralNetwork = NeuralNetwork,
 ): 
     '''
     Tries to load the neural network from a csv file.
@@ -120,7 +121,7 @@ def try_load_network_from_csv(
         print('Could not find criterion constructor, using default.')
         crit = crit_class()
 
-    net = NeuralNetwork(model, optimizer, crit)
+    net = net_class(model, optimizer, crit)
 
     try:
         id = row[column_mapper.get('id', 'id')]
@@ -131,7 +132,7 @@ def try_load_network_from_csv(
     net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
     weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
     
-    NeuralNetwork.load_class(net, callbacks, net_path)
+    net_class.load_class(net, callbacks, net_path)
 
     if load_best:
         try:
