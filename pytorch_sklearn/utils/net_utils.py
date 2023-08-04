@@ -23,6 +23,7 @@ def try_load_network_from_csv(
     module_list: Iterable[str] = None,
     device: str = None,
     net_class: NeuralNetwork = NeuralNetwork,
+    supress_warnings: bool = False,
 ): 
     '''
     Tries to load the neural network from a csv file.
@@ -96,7 +97,7 @@ def try_load_network_from_csv(
         constructor = ast.literal_eval(row[column_mapper['model_constructor']])  # :)
         model = model_class(**constructor)
     except:
-        print('Could not find model constructor, using default.')
+        if not supress_warnings: print('Could not find model constructor, using default.')
         model = model_class()
 
     get_device = lambda: 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -107,7 +108,7 @@ def try_load_network_from_csv(
         constructor = ast.literal_eval(row[column_mapper['optim_constructor']])  # :)
         optimizer = optim_class(model.parameters(), **constructor)
     except:
-        print('Could not find optimizer constructor, using default.')
+        if not supress_warnings: print('Could not find optimizer constructor, using default.')
         try:
             lr = row[column_mapper['lr']]
             optimizer = optim_class(model.parameters(), lr=lr)
@@ -118,7 +119,7 @@ def try_load_network_from_csv(
         constructor = ast.literal_eval(row[column_mapper['crit_constructor']])  # :)
         crit = crit_class(**constructor)
     except:
-        print('Could not find criterion constructor, using default.')
+        if not supress_warnings: print('Could not find criterion constructor, using default.')
         crit = crit_class()
 
     net = net_class(model, optimizer, crit)
@@ -138,7 +139,7 @@ def try_load_network_from_csv(
         try:
             net.load_weights_from_path(weight_path)
         except:
-            print('Did not find best weights, using original.')
+            if not supress_warnings: print('Did not find best weights, using original.')
 
     return net
 
@@ -153,6 +154,8 @@ def try_load_model_from_csv(
     relative_path: bool = True,
     module_list: Iterable[str] = None,
     device: str = None,
+    net_class: NeuralNetwork = NeuralNetwork,
+    supress_warnings: bool = False
 ): 
     '''
     Tries to load model from a csv file. 
@@ -222,7 +225,7 @@ def try_load_model_from_csv(
         constructor = ast.literal_eval(row[column_mapper.get('model_constructor', 'model_constructor')])  # :)
         model = model_class(**constructor)
     except:
-        print('Could not find model constructor, using default.')
+        if not supress_warnings: print('Could not find model constructor, using default.')
         model = model_class()
 
     get_device = lambda: 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -233,7 +236,7 @@ def try_load_model_from_csv(
         constructor = ast.literal_eval(row[column_mapper.get('optim_constructor', 'optim_constructor')])  # :)
         optimizer = optim_class(model.parameters(), **constructor)
     except:
-        print('Could not find optimizer constructor, using default.')
+        if not supress_warnings: print('Could not find optimizer constructor, using default.')
         try:
             lr = row[column_mapper['lr']]
             optimizer = optim_class(model.parameters(), lr=lr)
@@ -244,10 +247,10 @@ def try_load_model_from_csv(
         constructor = ast.literal_eval(row[column_mapper.get('crit_constructor', 'crit_constructor')])  # :)
         crit = crit_class(**constructor)
     except:
-        print('Could not find criterion constructor, using default.')
+        if not supress_warnings: print('Could not find criterion constructor, using default.')
         crit = crit_class()
 
-    net = NeuralNetwork(model, optimizer, crit)
+    net = net_class(model, optimizer, crit)
 
     try:
         id = row[column_mapper.get('id', 'id')]
@@ -261,7 +264,7 @@ def try_load_model_from_csv(
         try:
             net.load_weights_from_path(weight_path)
         except:
-            print('Did not find best weights, using original.')
+            if not supress_warnings: print('Did not find best weights, using original.')
 
     return net
 
@@ -284,6 +287,8 @@ def try_load_cyclegan_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
+    cyclegan_class: CycleGAN = CycleGAN,
+    supress_warnings: bool = False
 ): 
     '''
     Tries to load the CycleGAN network from a csv file.
@@ -340,7 +345,8 @@ def try_load_cyclegan_from_csv(
         callbacks=callbacks,
         module_list=module_list,
         device=device,
-        cyclegan_class=CycleGAN,
+        cyclegan_class=cyclegan_class,
+        supress_warnings=supress_warnings
     )
 
 
@@ -356,6 +362,8 @@ def try_load_r2cgan_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
+    r2cgan_class: R2CGAN = R2CGAN,
+    supress_warnings: bool = False
 ): 
     '''
     Tries to load the R2CGAN network from a csv file.
@@ -412,7 +420,7 @@ def try_load_r2cgan_from_csv(
         callbacks=callbacks,
         module_list=module_list,
         device=device,
-        cyclegan_class=R2CGAN,
+        cyclegan_class=r2cgan_class,
     )
         
 
@@ -430,6 +438,7 @@ def _try_load_cyclegan_from_csv(
     module_list: Iterable[str] = None,
     device: str = None,
     cyclegan_class = CycleGAN,
+    supress_warnings: bool = False
 ): 
     import sys
     callbacks = [] if callbacks is None else callbacks
@@ -472,25 +481,25 @@ def _try_load_cyclegan_from_csv(
         try:
             G_A = model_classes[0](**constructors['G_A'])
         except:
-            print('No constructor found for G_A, using default.')
+            if not supress_warnings: print('No constructor found for G_A, using default.')
             G_A = model_classes[0]()
         try:
             G_B = model_classes[1](**constructors['G_B'])
         except:
-            print('No constructor found for G_B, using default.')
+            if not supress_warnings: print('No constructor found for G_B, using default.')
             G_B = model_classes[1]()
         try:
             D_A = model_classes[2](**constructors['D_A'])
         except:
-            print('No constructor found for D_A, using default.')
+            if not supress_warnings: print('No constructor found for D_A, using default.')
             D_A = model_classes[2]()
         try:
             D_B = model_classes[3](**constructors['D_B'])
         except:
-            print('No constructor found for D_B, using default.')
+            if not supress_warnings: print('No constructor found for D_B, using default.')
             D_B = model_classes[3]()
     except:
-        print('No constructors found, using default.')
+        if not supress_warnings: print('No constructors found, using default.')
         G_A = model_classes[0]()
         G_B = model_classes[1]()
         D_A = model_classes[2]()
@@ -515,7 +524,7 @@ def _try_load_cyclegan_from_csv(
             else:
                 G_A_optim = optim_classes[0](list(G_A.parameters()) + list(G_B.parameters()), **G_optim_constructor)
         except:
-            print('No constructor found for G_A_optim, using default.')
+            if not supress_warnings: print('No constructor found for G_A_optim, using default.')
             if lr is not None:
                 G_A_optim = optim_classes[0](list(G_A.parameters()) + list(G_B.parameters()), lr=lr)
             else:
@@ -528,13 +537,13 @@ def _try_load_cyclegan_from_csv(
             else:
                 D_A_optim = optim_classes[1](list(D_A.parameters()) + list(D_B.parameters()), **D_optim_constructor)
         except:
-            print('No constructor found for D_A_optim, using default.')
+            if not supress_warnings: print('No constructor found for D_A_optim, using default.')
             if lr is not None:
                 D_A_optim = optim_classes[1](list(D_A.parameters()) + list(D_B.parameters()), lr=lr)
             else:
                 D_A_optim = optim_classes[1](list(D_A.parameters()) + list(D_B.parameters()))
     except: 
-        print('No constructor found for optimizers, using default.')
+        if not supress_warnings: print('No constructor found for optimizers, using default.')
         if lr is not None:
             G_A_optim = optim_classes[0](list(G_A.parameters()) + list(G_B.parameters()), lr=lr)
             D_A_optim = optim_classes[1](list(D_A.parameters()) + list(D_B.parameters()), lr=lr)
@@ -564,6 +573,6 @@ def _try_load_cyclegan_from_csv(
         try:
             net.load_weights_from_path(weight_path)
         except:
-            print('Did not find best weights, using original.')
+            if not supress_warnings: print('Did not find best weights, using original.')
 
     return net

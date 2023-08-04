@@ -3,6 +3,7 @@
 from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.utils.func_utils import to_safe_tensor
 from pytorch_sklearn.callbacks.utils import Tally
+from pytorch_sklearn.utils.model_utils import get_receptive_field
 import pytorch_sklearn as psk
 
 import torch
@@ -631,30 +632,85 @@ class LRScheduler(Callback):
         elif interval[1] == -1:
             interval[1] = float("inf")
         return interval
+    
+
+class ReceptiveFieldVisualizer(Callback):
+    def __init__(self, save_path: str, dummy_input: torch.Tensor, target_idx=None, per_epoch=True, create_path=False):
+        """
+        Visualizes the receptive field of the model by calculating the gradient of the center pixel with respect to the input.
+        Assumes the model takes an image as input. The receptive field is absoluted and normalized.
+
+        Parameters
+        ----------
+        dummy_input
+            The input to pass through the model to calculate the receptive field. If unsure, use torch.ones(1, C, H, W) * 0.01 where C,H,W are suitable for the model.
+
+        target_idx
+            If the model has multiple outputs, this specifies which output to calculate the receptive field for.
+
+        per_epoch
+            If True, saves the receptive field at the end of every epoch. If False, saves the receptive field at the end of every batch.
+        """
+        super().__init__()
+        assert len(dummy_input.shape) == 4, "dummy_input must be of shape (N, C, H, W)"
+        assert dummy_input.shape[0] == 1, "dummy_input must have a batch size of 1"
+        assert dummy_input.shape[1] == 1 or dummy_input.shape[1] == 3, "dummy_input must be Grayscale or RGB"
+
+        self.save_path = save_path
+        self.dummy_input = dummy_input
+        self.cmap = "gray" if dummy_input.shape[1] == 1 else "viridis"
+        self.per_epoch = per_epoch
+        self.create_path = create_path
+        if create_path:
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+
+        # Previous epochs if this model has stopped and resumed training
+        self.prev_epochs = 0
+
+    # Saving/Loading
+    def state_dict(self):
+        return {}
+
+    def load_state_dict(self, state_dict: dict):
+        pass
+
+    def on_fit_begin(self, net):
+        try: self.prev_epochs = len(net.history.track[next(iter(net.history.track))])
+        except: pass
+
+    def on_train_epoch_end(self, net: "psk.NeuralNetwork"):
+        self.dummy_input = self.dummy_input.to(net._device)
+        rf = get_receptive_field(self.dummy_input, net.module, absnorm=True)
+        rf = rf.detach().cpu()
+        plt.figure(figsize=(10,10))
+        plt.imshow(rf[0].permute(1, 2, 0), cmap="gray")
+        plt.savefig(osj(self.save_path, f"rf_ep{net._epoch + self.prev_epochs:04d}.png"), bbox_inches="tight")
+        plt.close()
 
 
 class ImageOutputWriter(Callback):
-    """
-    Saves the batch input, output, and the ground truth as images every 'freq' batches.
-
-    Parameters
-    ----------
-    save_path
-        The folder to save in.
-    freq : int
-        Saves images every 'freq' batches.
-    num_saved : int
-        If there are too many images per batch, you can choose how many to save. None by default, which means save all the images.
-    start : int
-        The saved images are named as: "epoch_{poch}_batch_{batch}_{current:03d}.png". This variable determines the starting point of 'current'.
-    clamp01 : bool
-        Whether the images are clamp between 0 and 1 (applied before 'preprocess').
-    create_path : bool
-        Whether the given 'save_path' should be created by this class or not.
-    preprocess : callable(img) -> img
-        A callable that expects a PyTorch tensor of shape (C x H x W), detached and on CPU, and outputs the processed tensor of the same shape.
-    """
     def __init__(self, save_path, freq, num_saved=None, start=0, clamp01=True, create_path=False, preprocess=None):
+        """
+        Saves the batch input, output, and the ground truth as images every 'freq' batches.
+
+        Parameters
+        ----------
+        save_path
+            The folder to save in.
+        freq : int
+            Saves images every 'freq' batches.
+        num_saved : int
+            If there are too many images per batch, you can choose how many to save. None by default, which means save all the images.
+        start : int
+            The saved images are named as: "epoch_{poch}_batch_{batch}_{current:03d}.png". This variable determines the starting point of 'current'.
+        clamp01 : bool
+            Whether the images are clamp between 0 and 1 (applied before 'preprocess').
+        create_path : bool
+            Whether the given 'save_path' should be created by this class or not.
+        preprocess : callable(img) -> img
+            A callable that expects a PyTorch tensor of shape (C x H x W), detached and on CPU, and outputs the processed tensor of the same shape.
+        """
         super().__init__()
         self.save_path = save_path
         self.freq = freq

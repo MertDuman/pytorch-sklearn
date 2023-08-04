@@ -511,7 +511,7 @@ class NeuralNetwork:
         checkpoint_device = state_dict[next(iter(state_dict))].device
         self.to_device(checkpoint_device)
 
-        self.module.load_state_dict(state_dict)
+        self.module.load_state_dict(state_dict, strict=False)
 
     def state_dict(self):
         return {

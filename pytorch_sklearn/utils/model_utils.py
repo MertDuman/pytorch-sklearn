@@ -1,3 +1,9 @@
+import torch
+import torch.autograd as AG
+import numpy as np
+import matplotlib.pyplot as plt
+
+
 def get_num_params(model):
     ''' Counts all parameters in a model. '''
     return sum(p.numel() for p in model.parameters())
@@ -82,3 +88,91 @@ def print_model_param_info(model, cell_len=30, cell_algn="<", in_filters=None, e
         if is_container:
             final_params = f"{m_params} - C"
         print(f"{type_name:{cell_algn}{cell_len}} {n:{cell_algn}{cell_len}} {final_params:{cell_algn}{cell_len}}")
+
+
+def get_receptive_field(x: torch.Tensor, model: torch.nn.Module, target_idx: int = None, absnorm=False, oneminus=False, target_pixels: torch.Tensor = None):
+    '''
+    Calculates the receptive field of a model by calculating the derivative of the center output pixel w.r.t input x.
+
+    Parameters
+    ----------
+    x
+        Input tensor of shape (1, C, H, W) where C, H, W are suitable for the model. This makes most sense when x is an image from the model's dataset.
+        If unsure, pass torch.ones(1, C, H, W) * 0.01.
+    model
+        The model to calculate the receptive field for.
+    target_idx
+        If the model has multiple outputs, this specifies which output to calculate the receptive field for.
+    absnorm
+        If True, the gradient is normalized to [0, 1] by taking the absolute value and normalizing it.
+    oneminus
+        If True, returns 1 - normalized gradient. This sets absnorm to True as well.
+    target_pixels
+        By default, the receptive field is calculated for the center pixel of the output. If target_pixels is specified, the receptive field is calculated 
+        for these pixels instead. target_pixels must match the exact shape of the model output. This lets you specify multiple pixels as well.
+    '''
+    assert x.ndim == 4, "x must be of shape (1, C, H, W) where C, H, W are suitable for the model"
+    
+    if oneminus:
+        absnorm = True
+
+    # Input requires grad
+    x = x.requires_grad_(True)
+    # y has grad_fn and requires_grad
+    y = model(x)
+
+    if target_idx is not None:
+        y = y[target_idx]
+
+    if target_pixels is None:
+        grd = torch.zeros_like(y)
+        grd[:, :, y.shape[2] // 2, y.shape[3] // 2] = 1
+    else:
+        grd = target_pixels
+    
+    # grad is calculated, but model weights are untouched, their grad fields are not filled, and y's computation graph is freed
+    grad = AG.grad(y, x, grd)[0]
+
+    if absnorm:
+        grad = torch.abs(grad)
+        grad = (grad - grad.amin(dim=(2,3), keepdim=True)) / (grad.amax(dim=(2,3), keepdim=True) - grad.amin(dim=(2,3), keepdim=True))
+
+    if oneminus:
+        grad = 1 - grad
+    return grad
+
+
+def plot_receptive_fields(*models: torch.nn.Module, x: torch.Tensor, **kwargs):
+    '''
+    Streamlines plotting receptive fields for multiple models. Plots the receptive field of each model in a grid.
+
+    Parameters
+    ----------
+    models
+        The models to plot the receptive fields for.
+    x
+        Input tensor of shape (1, C, H, W) where C, H, W are suitable for the models. This makes most sense when x is an image from the models' dataset.
+    kwargs
+        Keyword arguments to pass to get_receptive_field.
+    '''
+    num_models = len(models)
+    # Find best grid size by finding the largest number that divides num_models. If there is no such number, use the largest square that fits and delete the extra axes.
+    rows, cols = [(r, num_models // r) for r in range(1, int(np.sqrt(num_models)) + 1) if num_models % r == 0][-1]
+    if rows == 1 and num_models != 1:
+        rows = int(np.sqrt(num_models))
+        cols = num_models // rows + 1
+    fig, axs = plt.subplots(rows, cols, figsize=(7 * cols, 5 * rows), squeeze=False)
+
+    for i in range(rows * cols):
+        if i >= num_models:
+            fig.delaxes(axs[i // cols, i % cols])
+            continue
+        model = models[i]
+        rf = get_receptive_field(x, model, **kwargs)
+        ax = axs[i // cols, i % cols]
+        ax.imshow(rf[0].permute(1, 2, 0).cpu(), interpolation='none')
+        ax.set_title(type(model).__name__)
+
+    fig.tight_layout()
+    plt.subplots_adjust(wspace=-0.55, hspace=0.15)
+    plt.show()
