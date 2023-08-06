@@ -2,6 +2,7 @@ import torch
 import torch.autograd as AG
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Union
 
 
 def get_num_params(model):
@@ -157,10 +158,7 @@ def plot_receptive_fields(*models: torch.nn.Module, x: torch.Tensor, **kwargs):
     '''
     num_models = len(models)
     # Find best grid size by finding the largest number that divides num_models. If there is no such number, use the largest square that fits and delete the extra axes.
-    rows, cols = [(r, num_models // r) for r in range(1, int(np.sqrt(num_models)) + 1) if num_models % r == 0][-1]
-    if rows == 1 and num_models != 1:
-        rows = int(np.sqrt(num_models))
-        cols = num_models // rows + 1
+    rows, cols = find_optimal_grid_size(num_models, fit_rect_if_above=2)
     fig, axs = plt.subplots(rows, cols, figsize=(7 * cols, 5 * rows), squeeze=False)
 
     for i in range(rows * cols):
@@ -176,3 +174,54 @@ def plot_receptive_fields(*models: torch.nn.Module, x: torch.Tensor, **kwargs):
     fig.tight_layout()
     plt.subplots_adjust(wspace=-0.55, hspace=0.15)
     plt.show()
+
+
+
+def find_optimal_grid_size(N, aspect_ratio: Union[int, tuple] = 1, fit_rect_if_above=None):
+    '''
+    Finds the grid size that best matches the aspect_ratio. By default, the aspect ratio is 1, which means the grid is as square as possible. If you're
+    plotting patches of an image, for example, you can set the aspect ratio to the aspect ratio of the image to get a grid that matches the image.
+
+    Parameters
+    ----------
+    N
+        Number of elements to fit in the grid.
+    aspect_ratio
+        A float for the aspect ratio or a 2-tuple for (height, width).
+    fit_rect_if_below_or_above
+        If the aspect ratio of the best fit is above this value, it will be changed to sqrt(N) x sqrt(N) + 1. 
+        This will give you unused axes, but will stop the grid from being too long or too tall.
+        The aspect ratio is always converted to > 1 before this check is done.
+        Defaults to None (or inf), which means it will never fit to a rectangle.
+    '''
+    fit_rect_if_above = float('inf') if fit_rect_if_above is None else fit_rect_if_above
+    
+    if isinstance(aspect_ratio, tuple):
+        aspect_ratio = aspect_ratio[1] / aspect_ratio[0]
+
+    if fit_rect_if_above < 1:
+        fit_rect_if_above = 1 / fit_rect_if_above
+
+    did_flip = False
+    if aspect_ratio < 1:
+        did_flip = True
+        aspect_ratio = 1 / aspect_ratio
+
+    best_fit = float('inf')
+    best_ratio = float('inf')
+    for height, width in ((r, N // r) for r in range(1, int(np.sqrt(N)) + 1) if N % r == 0):
+        cur_aspect_ratio = width / height
+
+        fit = abs(cur_aspect_ratio - aspect_ratio)
+        
+        if fit <= best_fit:
+            best_fit = fit
+            best_ratio = cur_aspect_ratio
+            best_height, best_width = height, width
+            if did_flip:
+                best_height, best_width = width, height
+    
+    if best_ratio > fit_rect_if_above and N != 1:
+        best_height = int(np.sqrt(N))
+        best_width = N // best_height + 1
+    return best_height, best_width
