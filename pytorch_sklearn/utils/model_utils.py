@@ -91,7 +91,7 @@ def print_model_param_info(model, cell_len=30, cell_algn="<", in_filters=None, e
         print(f"{type_name:{cell_algn}{cell_len}} {n:{cell_algn}{cell_len}} {final_params:{cell_algn}{cell_len}}")
 
 
-def get_receptive_field(x: torch.Tensor, model: torch.nn.Module, target_idx: int = None, absnorm=False, oneminus=False, target_pixels: torch.Tensor = None):
+def get_receptive_field(x: torch.Tensor, model: torch.nn.Module, target_output: int = None, absnorm=False, oneminus=False, target_pixels: torch.Tensor = None):
     '''
     Calculates the receptive field of a model by calculating the derivative of the center output pixel w.r.t input x.
 
@@ -122,8 +122,8 @@ def get_receptive_field(x: torch.Tensor, model: torch.nn.Module, target_idx: int
     # y has grad_fn and requires_grad
     y = model(x)
 
-    if target_idx is not None:
-        y = y[target_idx]
+    if target_output is not None:
+        y = y[target_output]
 
     if target_pixels is None:
         grd = torch.zeros_like(y)
