@@ -635,7 +635,7 @@ class LRScheduler(Callback):
     
 
 class ReceptiveFieldVisualizer(Callback):
-    def __init__(self, save_path: str, dummy_input: torch.Tensor, target_idx=None, per_epoch=True, create_path=False):
+    def __init__(self, save_path: str, dummy_input: torch.Tensor, target_output=None, per_epoch=True, create_path=False):
         """
         Visualizes the receptive field of the model by calculating the gradient of the center pixel with respect to the input.
         Assumes the model takes an image as input. The receptive field is absoluted and normalized.
@@ -644,10 +644,8 @@ class ReceptiveFieldVisualizer(Callback):
         ----------
         dummy_input
             The input to pass through the model to calculate the receptive field. If unsure, use torch.ones(1, C, H, W) * 0.01 where C,H,W are suitable for the model.
-
-        target_idx
+        target_output
             If the model has multiple outputs, this specifies which output to calculate the receptive field for.
-
         per_epoch
             If True, saves the receptive field at the end of every epoch. If False, saves the receptive field at the end of every batch.
         """
@@ -661,6 +659,7 @@ class ReceptiveFieldVisualizer(Callback):
         self.cmap = "gray" if dummy_input.shape[1] == 1 else "viridis"
         self.per_epoch = per_epoch
         self.create_path = create_path
+        self.target_output = target_output
         if create_path:
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
@@ -681,7 +680,7 @@ class ReceptiveFieldVisualizer(Callback):
 
     def on_train_epoch_end(self, net: "psk.NeuralNetwork"):
         self.dummy_input = self.dummy_input.to(net._device)
-        rf = get_receptive_field(self.dummy_input, net.module, absnorm=True)
+        rf = get_receptive_field(self.dummy_input, net.module, absnorm=True, target_output=self.target_output)
         rf = rf.detach().cpu()
         plt.figure(figsize=(10,10))
         plt.imshow(rf[0].permute(1, 2, 0), cmap="gray")

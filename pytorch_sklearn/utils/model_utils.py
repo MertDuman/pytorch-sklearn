@@ -188,11 +188,11 @@ def find_optimal_grid_size(N, aspect_ratio: Union[int, tuple] = 1, fit_rect_if_a
         Number of elements to fit in the grid.
     aspect_ratio
         A float for the aspect ratio or a 2-tuple for (height, width).
-    fit_rect_if_below_or_above
+    fit_rect_if_above
         If the aspect ratio of the best fit is above this value, it will be changed to sqrt(N) x sqrt(N) + 1. 
         This will give you unused axes, but will stop the grid from being too long or too tall.
         The aspect ratio is always converted to > 1 before this check is done.
-        Defaults to None (or inf), which means it will never fit to a rectangle.
+        Defaults to None (or inf), which means this behavior is off.
     '''
     fit_rect_if_above = float('inf') if fit_rect_if_above is None else fit_rect_if_above
     
