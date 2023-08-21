@@ -170,11 +170,7 @@ def plot_receptive_fields(*models: torch.nn.Module, x: torch.Tensor, **kwargs):
         ax = axs[i // cols, i % cols]
         ax.imshow(rf[0].permute(1, 2, 0).cpu(), interpolation='none')
         ax.set_title(type(model).__name__)
-
-    fig.tight_layout()
-    plt.subplots_adjust(wspace=-0.55, hspace=0.15)
-    plt.show()
-
+    return fig, axs
 
 
 def find_optimal_grid_size(N, aspect_ratio: Union[int, tuple] = 1, fit_rect_if_above=None):

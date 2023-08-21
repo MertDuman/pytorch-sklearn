@@ -1,4 +1,4 @@
-# __all__ = ["History", "Verbose", "EarlyStopping", "LossPlot", "WeightCheckpoint", "LRScheduler", "Tracker", "CallbackInfo"]
+# __all__ = ["History", "Verbose", "EarlyStopping", "LossPlotter", "WeightCheckpoint", "LRScheduler", "Tracker", "CallbackInfo"]
 
 from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.utils.func_utils import to_safe_tensor
@@ -21,7 +21,7 @@ from os.path import join as osj
 # Verbose
 import time
 
-# LossPlot
+# LossPlotter
 # IPython.get_ipython
 import matplotlib as mpl
 import sys
@@ -166,7 +166,7 @@ class CycleGANHistory(History):
 
 
 class Verbose(Callback):
-    def __init__(self, verbose=4, notebook=False):
+    def __init__(self, verbose=4, notebook=False,old_version=False):
         """
         Prints the following training information:
             - Current Epoch / Total Epochs
@@ -190,6 +190,7 @@ class Verbose(Callback):
         self.name = "Verbose"
         self.verbose = verbose
         self.notebook = notebook
+        self.old_version = old_version
 
         # Time info
         self.total_time = 0
@@ -244,32 +245,36 @@ class Verbose(Callback):
             opt.extend([f"{net._pass_type}_{name}: {epoch_metrics[i]:.3f}" for i, name in enumerate(net._metrics.keys(), start=1)])
         if self.verbose >= 4:
             opt.extend([f"Time: {self.total_time:.2f}", f"ETA: {self.rem_time:.2f}"])
-        print_progress(net._batch, net._num_batches, opt=opt, notebook=self.notebook)
+        print_progress(net._batch, net._num_batches, opt=opt, notebook=self.notebook, old_version=self.old_version)
 
 
-class LossPlot(Callback):
+class LossPlotter(Callback):
     def __init__(self,
-                 new_backend="Qt5Agg",
-                 pyplot_name="matplotlib.pyplot",
+                 per_step=1,
                  max_col=1,
                  block_on_finish=False,
                  savefig=False,
                  savename=None,
-                 figure_kw=None):
-        super(LossPlot, self).__init__()
+                 plot_kw=None,
+                 figure_kw=None,
+                 new_backend="Qt5Agg",
+                 pyplot_name="matplotlib.pyplot",):
+        super().__init__()
         self.get_ipython = __import__('IPython', globals(), locals(), ['get_ipython'], 0).get_ipython
 
-        self.new_backend = new_backend
-        self.old_backend = mpl.get_backend()
-        self.pyplot_name = pyplot_name
+        self.per_step = per_step
         self.max_col = max_col
-        self.is_ipython = self.get_ipython() is not None
         self.block_on_finish = block_on_finish
         self.savefig = savefig
         self.savename = savename
         if self.savefig:
             assert self.savename is not None, "You must provide a savename."
+        self.plot_kw = {} if plot_kw is None else plot_kw
         self.figure_kw = {} if figure_kw is None else figure_kw
+        self.new_backend = new_backend
+        self.old_backend = mpl.get_backend()
+        self.pyplot_name = pyplot_name
+        self.is_ipython = self.get_ipython() is not None
 
         # on_fit_begin
         self.fig = None
@@ -279,7 +284,7 @@ class LossPlot(Callback):
         return {"fig": self.fig, "axes": self.axes}
 
     def on_fit_begin(self, net):
-        self.switch_qt5()
+        # self.switch_qt5()
         plt.ion()  # turn on interactive mode
 
         num_metrics = net.history.num_metrics
@@ -294,28 +299,30 @@ class LossPlot(Callback):
 
         # Define empty lines for loss line
         self.axes[0, 0].set_title(f"{net.criterion.__class__.__name__}")
-        self.axes[0, 0].plot([], [], "-o", label="train loss")
+        self.axes[0, 0].plot([], [], "-o", label="train loss", **self.plot_kw)
         if net._validate:
-            self.axes[0, 0].plot([], [], "-o", label="val loss")
+            self.axes[0, 0].plot([], [], "-o", label="val loss", **self.plot_kw)
         self.axes[0, 0].legend()
 
         # Define empty lines for other metric lines
         for i, name in enumerate(net._metrics.keys(), start=1):
             ax = self.axes[i // self.max_col, i % self.max_col]
             ax.set_title(f"{name.capitalize()}")
-            ax.plot([], [], "-o", label=f"train {name}")
+            ax.plot([], [], "-o", label=f"train {name}", **self.plot_kw)
             if net._validate:
-                ax.plot([], [], "-o", label=f"val {name}")
+                ax.plot([], [], "-o", label=f"val {name}", **self.plot_kw)
             ax.legend()
 
         # h, l = self.axes[0, 0].get_legend_handles_labels()
         # self.fig.legend(l)
 
     def on_train_epoch_end(self, net):
-        self.plot_metrics(net)
+        if net._epoch % self.per_step == 0:
+            self.plot_metrics(net)
 
     def on_val_epoch_end(self, net):
-        self.plot_metrics(net)
+        if net._epoch % self.per_step == 0:
+            self.plot_metrics(net)
 
     def plot_metrics(self, net):
         track = net.history.track
@@ -342,7 +349,7 @@ class LossPlot(Callback):
             self.fig.savefig(self.savename, bbox_inches="tight")
         if self.block_on_finish:
             plt.show(block=True)
-        self.switch_normal(self.old_backend)
+        # self.switch_normal(self.old_backend)
 
     def force_draw(self):
         self.fig.canvas.draw()

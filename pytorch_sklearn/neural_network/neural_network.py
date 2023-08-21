@@ -283,7 +283,7 @@ class NeuralNetwork:
     ):
         # Handle None inputs.
         batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
         fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
@@ -321,7 +321,7 @@ class NeuralNetwork:
     ):
         # Handle None inputs.
         batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
         fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
@@ -387,7 +387,7 @@ class NeuralNetwork:
     ):
         # Handle None inputs.
         batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else True)
+        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
         fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
@@ -504,14 +504,20 @@ class NeuralNetwork:
         self._original_state_dict = None
 
     def get_module_weights(self):
+        ''' Returns the state dict of all the modules that are part of this network. '''
         return self.module.state_dict()
     
     def load_module_weights(self, state_dict):
+        ''' Loads the given state dict into the modules that are part of this network. '''
         # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
         checkpoint_device = state_dict[next(iter(state_dict))].device
         self.to_device(checkpoint_device)
 
         self.module.load_state_dict(state_dict, strict=False)
+
+    def get_module_parameters(self):
+        ''' Returns all the parameters of the modules that are part of this network. '''
+        yield from self.module.parameters()
 
     def state_dict(self):
         return {

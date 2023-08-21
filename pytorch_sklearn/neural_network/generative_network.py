@@ -392,6 +392,12 @@ class CycleGAN(NeuralNetwork):
         self.D_A.load_state_dict(state_dict["D_A_state"])
         self.D_B.load_state_dict(state_dict["D_B_state"])
 
+    def get_module_parameters(self):
+        yield from self.G_A.parameters()
+        yield from self.G_B.parameters()
+        yield from self.D_A.parameters()
+        yield from self.D_B.parameters()
+
     def state_dict(self):
         return {
             **self.get_module_weights(),
@@ -583,7 +589,7 @@ class R2CGAN(CycleGAN):
             Batch data as returned by the dataloader provided to ``score``.
         score_func : Optional[Callable]
             Score function passed to ``score``. If None, the criterion is used by default.
-            Takes a tuple of ``(A2B, B2A, A2B2A, B2A2B)`` as input, and returns either a scalar, tuple of scalars, tensor, or tuple of tensors.
+            Takes a tuple of ``(A, B, A2B, B2A, A2B2A, B2A2B, A2A, B2B)`` as input, and returns either a scalar, tuple of scalars, tensor, or tuple of tensors.
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''

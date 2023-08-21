@@ -198,7 +198,6 @@ def try_load_model_from_csv(
         Device to load the network to. If not passed, will use 'cuda' if available, else 'cpu'.
     '''
     import sys
-    callbacks = [] if callbacks is None else callbacks
     module_list = sys.modules.copy() if module_list is None else module_list
     column_mapper = column_mapper if column_mapper is not None else {}
 
