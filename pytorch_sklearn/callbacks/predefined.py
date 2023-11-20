@@ -166,7 +166,7 @@ class CycleGANHistory(History):
 
 
 class Verbose(Callback):
-    def __init__(self, verbose=4, notebook=False,old_version=False):
+    def __init__(self, verbose=4, notebook=False, old_version=False):
         """
         Prints the following training information:
             - Current Epoch / Total Epochs

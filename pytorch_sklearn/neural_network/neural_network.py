@@ -23,6 +23,8 @@ from typing import Any, Callable, Iterable, Sequence, Mapping, Optional, Union
 TODO:
 - Documentation missing.
 
+- If train_X is passed as a dataloader, then batch_size should automatically be set to the batch_size of the dataloader.
+
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
   Could also add a 'reduction' parameter to the metrics, e.g. 'mean' or 'sum' or 'last'.
@@ -282,9 +284,9 @@ class NeuralNetwork:
         **decision_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
-        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
+        batch_size = batch_size if batch_size is not None else (getattr(self, "_batch_size", None) if getattr(self, "_batch_size", None) is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (getattr(self, "_use_cuda", None) if getattr(self, "_use_cuda", None) is not None else torch.cuda.is_available())
+        fits_gpu = fits_gpu if fits_gpu is not None else (getattr(self, "_fits_gpu", None) if getattr(self, "_fits_gpu", None) is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:
@@ -320,9 +322,9 @@ class NeuralNetwork:
         **decision_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
-        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
+        batch_size = batch_size if batch_size is not None else (getattr(self, "_batch_size", None) if getattr(self, "_batch_size", None) is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (getattr(self, "_use_cuda", None) if getattr(self, "_use_cuda", None) is not None else torch.cuda.is_available())
+        fits_gpu = fits_gpu if fits_gpu is not None else (getattr(self, "_fits_gpu", None) if getattr(self, "_fits_gpu", None) is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:
@@ -386,9 +388,9 @@ class NeuralNetwork:
         **score_func_kw
     ):
         # Handle None inputs.
-        batch_size = batch_size if batch_size is not None else (self._batch_size if self._batch_size is not None else 32)
-        use_cuda = use_cuda if use_cuda is not None else (self._use_cuda if self._use_cuda is not None else torch.cuda.is_available())
-        fits_gpu = fits_gpu if fits_gpu is not None else (self._fits_gpu if self._fits_gpu is not None else False)
+        batch_size = batch_size if batch_size is not None else (getattr(self, "_batch_size", None) if getattr(self, "_batch_size", None) is not None else 32)
+        use_cuda = use_cuda if use_cuda is not None else (getattr(self, "_use_cuda", None) if getattr(self, "_use_cuda", None) is not None else torch.cuda.is_available())
+        fits_gpu = fits_gpu if fits_gpu is not None else (getattr(self, "_fits_gpu", None) if getattr(self, "_fits_gpu", None) is not None else False)
 
         device = "cuda" if use_cuda else "cpu"
         if not use_cuda and fits_gpu:
@@ -460,8 +462,9 @@ class NeuralNetwork:
 
     def _notify(self, method_name, **cb_kwargs):
         for callback in self.callbacks:
-            if method_name in callback.__class__.__dict__:  # check if method is overridden
-                getattr(callback, method_name)(self, **cb_kwargs)
+            # This check is removed because it was stopping methods from subclasses of valid callbacks from being called.
+            # if method_name in callback.__class__.__dict__:  # check if method is overridden
+            getattr(callback, method_name)(self, **cb_kwargs)
 
     def _to_tensor(self, X: Any):
         if X is None or isinstance(X, (DataLoader, Dataset)):
@@ -556,10 +559,14 @@ class NeuralNetwork:
     @classmethod
     def load_class(cls, net: "NeuralNetwork", callbacks: Sequence[Callback], loadpath: str):
         with open(loadpath, "rb") as f:
-            if torch.cuda.is_available():
-                d = torch.load(f)
-            else:
-                d = torch.load(f, map_location=torch.device("cpu"))
+            map_location = None if torch.cuda.is_available() else torch.device("cpu")  # force CPU if no CUDA
+            try:
+                d = torch.load(f, map_location=map_location)
+            except RuntimeError:
+                print('Failed to load with torch. Trying with pickle.')
+                f.seek(0)
+                d = pickle.load(f)  # backwards compat last resort, likely fails if the weights are on GPU and there is no CUDA
+                
         net.load_state_dict(d["net_state"])
         net.callbacks = callbacks
         for i, callback in enumerate(net.callbacks):

@@ -1,13 +1,19 @@
 import torch
+import torch.nn as nn
 import torch.autograd as AG
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union
+from typing import Union, Iterable
 
 
 def get_num_params(model):
     ''' Counts all parameters in a model. '''
     return sum(p.numel() for p in model.parameters())
+
+
+def get_num_layers(model, layer_types: Iterable):
+    ''' Counts all layers of a certain type in a model. '''
+    return sum(isinstance(m, tuple(layer_types)) for m in model.modules())
 
 
 def print_model_param_info(model, cell_len=30, cell_algn="<", in_filters=None, ex_filters=None, ex_zero=False, ex_container=False, clip=True):

@@ -6,7 +6,7 @@ from pytorch_sklearn import NeuralNetwork
 from pytorch_sklearn.neural_network.generative_network import CycleGAN, R2CGAN
 from pytorch_sklearn.callbacks import Callback
 
-from typing import Mapping, Iterable
+from typing import Mapping, Iterable, Type
 import ast
 
 
@@ -22,7 +22,7 @@ def try_load_network_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
-    net_class: NeuralNetwork = NeuralNetwork,
+    net_class: Type[NeuralNetwork] = NeuralNetwork,
     supress_warnings: bool = False,
 ): 
     '''
@@ -154,7 +154,7 @@ def try_load_model_from_csv(
     relative_path: bool = True,
     module_list: Iterable[str] = None,
     device: str = None,
-    net_class: NeuralNetwork = NeuralNetwork,
+    net_class: Type[NeuralNetwork] = NeuralNetwork,
     supress_warnings: bool = False
 ): 
     '''
@@ -286,7 +286,7 @@ def try_load_cyclegan_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
-    cyclegan_class: CycleGAN = CycleGAN,
+    cyclegan_class: Type[CycleGAN] = CycleGAN,
     supress_warnings: bool = False
 ): 
     '''
@@ -361,7 +361,7 @@ def try_load_r2cgan_from_csv(
     callbacks: Iterable[Callback] = None,
     module_list: Iterable[str] = None,
     device: str = None,
-    r2cgan_class: R2CGAN = R2CGAN,
+    r2cgan_class: Type[R2CGAN] = R2CGAN,
     supress_warnings: bool = False
 ): 
     '''

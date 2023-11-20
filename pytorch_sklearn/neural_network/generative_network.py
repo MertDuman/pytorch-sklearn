@@ -24,17 +24,17 @@ class CycleGAN(NeuralNetwork):
 
     Parameters
     ----------
-    generator_A : PyTorch module
+    G_A : PyTorch module
         Generator that tries to convert class A to class B
-    generator_B : PyTorch module
+    G_B : PyTorch module
         Generator that tries to convert class B to class A
-    discriminator_A : PyTorch module
+    D_A : PyTorch module
         Discriminator that classifies input as "from class A" or "not from class A"
-    discriminator_B : PyTorch module
+    D_B : PyTorch module
         Discriminator that classifies input as "from class B" or "not from class B"
-    optimizer_Gen : PyTorch optimizer
+    G_optim : PyTorch optimizer
         Updates the weights of the generators.
-    optimizer_Disc : PyTorch optimizer
+    D_optim : PyTorch optimizer
         Updates the weights of the discriminators.
     criterion : PyTorch loss
         GAN loss that will be applied to discriminator outputs.
@@ -67,7 +67,7 @@ class CycleGAN(NeuralNetwork):
         assert criterion in self.implemented_gan_losses, f"Criterion {criterion} not implemented. Choose from {self.implemented_gan_losses}."
         self.G_criterion, self.D_criterion = self.build_criterion(criterion)
 
-        self.implemented_cycle_losses = ["l1", "l2"]
+        self.implemented_cycle_losses = ["l1", "l2"]  # TODO: focal frequency loss: https://github.com/EndlessSora/focal-frequency-loss
         assert cycle_loss in self.implemented_cycle_losses, f"Cycle loss {cycle_loss} not implemented. Choose from {self.implemented_cycle_losses}."
         self.cycle_loss = nn.L1Loss() if cycle_loss == "l1" else nn.MSELoss()
 
@@ -88,31 +88,6 @@ class CycleGAN(NeuralNetwork):
     def history(self) -> CycleGANHistory:
         assert isinstance(self.callbacks[0], CycleGANHistory)
         return self.callbacks[0]
-
-    def fit(
-        self,
-        train_X: Union[torch.Tensor, DataLoader, Dataset],
-        train_y: Optional[torch.Tensor] = None,
-        max_epochs: int = 10,
-        batch_size: int = 32,
-        use_cuda: bool = True,
-        fits_gpu: bool = False,
-        callbacks: Optional[Sequence[Callback]] = None,
-        metrics: Optional[Mapping[str, Callable]] = None,
-    ):
-        super().fit(
-            train_X=train_X,
-            train_y=train_y,
-            validate=False,
-            val_X=None,
-            val_y=None,
-            max_epochs=max_epochs,
-            batch_size=batch_size,
-            use_cuda=use_cuda,
-            fits_gpu=fits_gpu,
-            callbacks=callbacks,
-            metrics=metrics,
-        )
 
     def forward(self, X):
         A, B = X
@@ -173,7 +148,7 @@ class CycleGAN(NeuralNetwork):
 
         G_loss = G_A_loss + G_B_loss
         
-        if not self.elo_training or self.G_elo <= self.D_elo:
+        if self._pass_type == "train" and (not self.elo_training or self.G_elo <= self.D_elo):
             self.backward(G_loss, self.G_optim)
 
         # Gradients past this point are not needed
@@ -194,7 +169,7 @@ class CycleGAN(NeuralNetwork):
 
         D_loss = D_A_loss + D_B_loss
 
-        if not self.elo_training or self.G_elo >= self.D_elo:
+        if self._pass_type == "train" and (not self.elo_training or self.G_elo >= self.D_elo):
             self.backward(D_loss, self.D_optim)
 
         if self.elo_training:
@@ -512,7 +487,8 @@ class R2CGAN(CycleGAN):
 
         G_loss = G_A_loss + G_B_loss
         
-        self.backward(G_loss, self.G_optim)
+        if self._pass_type == "train":
+            self.backward(G_loss, self.G_optim)
 
         # Gradients past this point are not needed
         A2B = A2B.detach()
@@ -532,7 +508,8 @@ class R2CGAN(CycleGAN):
 
         D_loss = D_A_loss + D_B_loss
 
-        self.backward(D_loss, self.D_optim)
+        if self._pass_type == "train":
+            self.backward(D_loss, self.D_optim)
         
         return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
 

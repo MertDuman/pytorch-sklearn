@@ -1,4 +1,4 @@
-def print_progress(cur, tot, fill="=", close=["[", "]"], length=20, opt=None, sep=" - ", add_newline=False, notebook=False,old_version=False):
+def print_progress(cur, tot, fill="=", close=["[", "]"], length=20, opt=None, sep=" - ", add_newline=False, notebook=False, old_version=False):
     """
     Creates a progress bar that updates itself given the current value and max value.
 
