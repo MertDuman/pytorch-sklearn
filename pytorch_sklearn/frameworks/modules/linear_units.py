@@ -3,7 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def get_linear_unit(unit='relu'):
+def get_linear_unit(unit: str = 'relu'):
+    """
+    Get linear unit from string.
+    
+    Parameters
+    ----------
+    unit: one of [relu, leaky_relu, gelu, elu, celu, selu, prelu, rrelu, none].
+    """
     unit = unit.lower()
     if unit == 'relu':
         return nn.ReLU

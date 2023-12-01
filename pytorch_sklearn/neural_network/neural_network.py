@@ -25,6 +25,8 @@ TODO:
 
 - If train_X is passed as a dataloader, then batch_size should automatically be set to the batch_size of the dataloader.
 
+- metrics should just take batch_out, batch_data as input, and not batch_out, y, because many setups don't separate X and y, e.g. Autoencoders.
+
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
   Could also add a 'reduction' parameter to the metrics, e.g. 'mean' or 'sum' or 'last'.

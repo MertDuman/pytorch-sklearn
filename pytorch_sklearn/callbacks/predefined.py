@@ -86,10 +86,9 @@ class History(Callback):
 
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
         batch_out = to_safe_tensor(net._batch_out)
-        _, batch_y = net.unpack_fit_batch(net._batch_data)
         self.epoch_metrics[0] += net._batch_loss.item()
         for i, metric in enumerate(net._metrics.values(), start=1):
-            self.epoch_metrics[i] += metric(batch_out, batch_y)
+            self.epoch_metrics[i] += metric(batch_out, net._batch_data)
 
 
 class CycleGANHistory(History):
@@ -382,11 +381,11 @@ class NetCheckpoint(Callback):
         pass
 
     def on_train_epoch_end(self, net):
-        if not net._validate and (net._epoch - 1) % self.per_epoch == 0:
+        if not net._validate and (net._epoch % self.per_epoch == 0 or net._epoch == 1):
             psk.NeuralNetwork.save_class(net, self.savepath)
 
     def on_val_epoch_end(self, net):
-        if net._validate and (net._epoch - 1) % self.per_epoch == 0:
+        if net._validate and (net._epoch % self.per_epoch == 0 or net._epoch == 1):
             psk.NeuralNetwork.save_class(net, self.savepath)
 
     def on_fit_end(self, net: "psk.NeuralNetwork"):
