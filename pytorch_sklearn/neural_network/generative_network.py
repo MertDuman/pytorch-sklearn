@@ -45,8 +45,8 @@ class CycleGAN(NeuralNetwork):
         D_A: nn.Module, D_B: nn.Module, 
         G_optim: _Optimizer, D_optim: _Optimizer,
         criterion: str = "lsgan",
-        cycle_loss: str = "l1",
-        identity_loss: str = "l1",
+        cycle_criterion: str = "l1",
+        identity_criterion: str = "l1",
         lambda_cycle: float = 10.0,
         lambda_identity: float = 5.0,
         elo_training: bool = False,
@@ -68,12 +68,12 @@ class CycleGAN(NeuralNetwork):
         self.G_criterion, self.D_criterion = self.build_criterion(criterion)
 
         self.implemented_cycle_losses = ["l1", "l2"]  # TODO: focal frequency loss: https://github.com/EndlessSora/focal-frequency-loss
-        assert cycle_loss in self.implemented_cycle_losses, f"Cycle loss {cycle_loss} not implemented. Choose from {self.implemented_cycle_losses}."
-        self.cycle_loss = nn.L1Loss() if cycle_loss == "l1" else nn.MSELoss()
+        assert cycle_criterion in self.implemented_cycle_losses, f"Cycle loss {cycle_criterion} not implemented. Choose from {self.implemented_cycle_losses}."
+        self.cycle_criterion = nn.L1Loss() if cycle_criterion == "l1" else nn.MSELoss()
 
         self.implemented_identity_losses = ["l1", "l2"]
-        assert identity_loss in self.implemented_identity_losses, f"Identity loss {identity_loss} not implemented. Choose from {self.implemented_identity_losses}."
-        self.identity_loss = nn.L1Loss() if identity_loss == "l1" else nn.MSELoss()
+        assert identity_criterion in self.implemented_identity_losses, f"Identity loss {identity_criterion} not implemented. Choose from {self.implemented_identity_losses}."
+        self.identity_criterion = nn.L1Loss() if identity_criterion == "l1" else nn.MSELoss()
 
         # Maintenance parameters
         self._callbacks: Sequence[Callback] = [CycleGANHistory()]  # SAVED
@@ -138,11 +138,16 @@ class CycleGAN(NeuralNetwork):
         # Generator loss
         A2B_g_loss = self.G_criterion(A2B_logits)
         B2A_g_loss = self.G_criterion(B2A_logits)
-        A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
-        B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
-        A2A_identity_loss = self.identity_loss(A2A, A)
-        B2B_identity_loss = self.identity_loss(B2B, B)
 
+        # Cycle loss
+        A2B2A_cycle_loss = self.cycle_criterion(A2B2A, A)
+        B2A2B_cycle_loss = self.cycle_criterion(B2A2B, B)
+
+        # Identity loss
+        A2A_identity_loss = self.identity_criterion(A2A, A)
+        B2B_identity_loss = self.identity_criterion(B2B, B)
+
+        # Total generator loss
         G_A_loss = A2B_g_loss + A2B2A_cycle_loss * self.lambda_cycle + A2A_identity_loss * self.lambda_identity
         G_B_loss = B2A_g_loss + B2A2B_cycle_loss * self.lambda_cycle + B2B_identity_loss * self.lambda_identity
 
@@ -155,15 +160,16 @@ class CycleGAN(NeuralNetwork):
         A2B = A2B.detach()
         B2A = B2A.detach()
 
-        # Discriminator loss
         A_logits = self.D_A(A)
         B_logits = self.D_B(B)
         B2A_d_logits = self.D_A(B2A)
         A2B_d_logits = self.D_B(A2B)
 
+        # Discriminator loss
         A_d_loss, B2A_d_loss = self.D_criterion(A_logits, B2A_d_logits)
         B_d_loss, A2B_d_loss = self.D_criterion(B_logits, A2B_d_logits)
 
+        # Total discriminator loss
         D_A_loss = A_d_loss + B2A_d_loss
         D_B_loss = B_d_loss + A2B_d_loss
 
@@ -240,7 +246,7 @@ class CycleGAN(NeuralNetwork):
             Batch data as returned by the dataloader provided to ``score``.
         score_func : Optional[Callable]
             Score function passed to ``score``. If None, the criterion is used by default.
-            Takes a tuple of ``(A2B, B2A, A2B2A, B2A2B)`` as input, and returns either a scalar, tuple of scalars, tensor, or tuple of tensors.
+            Takes network input and output as input, and returns either a scalar, tuple of scalars, tensor, or tuple of tensors.
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
@@ -257,10 +263,10 @@ class CycleGAN(NeuralNetwork):
             # Generator loss
             A2B_g_loss = self.G_criterion(A2B_logits)
             B2A_g_loss = self.G_criterion(B2A_logits)
-            A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
-            B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
-            A2A_identity_loss = self.identity_loss(A2A, A)
-            B2B_identity_loss = self.identity_loss(B2B, B)
+            A2B2A_cycle_loss = self.cycle_criterion(A2B2A, A)
+            B2A2B_cycle_loss = self.cycle_criterion(B2A2B, B)
+            A2A_identity_loss = self.identity_criterion(A2A, A)
+            B2B_identity_loss = self.identity_criterion(B2B, B)
 
             G_A_loss = A2B_g_loss + A2B2A_cycle_loss * self.lambda_cycle + A2A_identity_loss * self.lambda_identity
             G_B_loss = B2A_g_loss + B2A2B_cycle_loss * self.lambda_cycle + B2B_identity_loss * self.lambda_identity
@@ -357,15 +363,18 @@ class CycleGAN(NeuralNetwork):
             "D_B_state": self.D_B.state_dict()
         }
     
-    def load_module_weights(self, state_dict):
+    def load_module_weights(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
         # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
         checkpoint_device = state_dict["G_A_state"][next(iter(state_dict["G_A_state"]))].device
         self.to_device(checkpoint_device)
 
-        self.G_A.load_state_dict(state_dict["G_A_state"])
-        self.G_B.load_state_dict(state_dict["G_B_state"])
-        self.D_A.load_state_dict(state_dict["D_A_state"])
-        self.D_B.load_state_dict(state_dict["D_B_state"])
+        if map_param_names is not None:
+            state_dict = {map_param_names.get(k, k): v for k, v in state_dict.items()}
+
+        self.G_A.load_state_dict(state_dict["G_A_state"], strict=strict)
+        self.G_B.load_state_dict(state_dict["G_B_state"], strict=strict)
+        self.D_A.load_state_dict(state_dict["D_A_state"], strict=strict)
+        self.D_B.load_state_dict(state_dict["D_B_state"], strict=strict)
 
     def get_module_parameters(self):
         yield from self.G_A.parameters()
@@ -384,8 +393,8 @@ class CycleGAN(NeuralNetwork):
             "batch": self._batch
         }
 
-    def load_state_dict(self, state_dict):
-        self.load_module_weights(state_dict)
+    def load_state_dict(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
+        self.load_module_weights(state_dict, strict=strict, map_param_names=map_param_names)
         self._original_state_dict = state_dict["original_module_state"]
         self._using_original = state_dict["using_original"]
         self.G_optim.load_state_dict(state_dict["G_optim_state"])
@@ -423,16 +432,16 @@ class R2CGAN(CycleGAN):
         D_A: nn.Module, D_B: nn.Module, 
         G_optim: _Optimizer, D_optim: _Optimizer,
         criterion: str = "lsgan",
-        cycle_loss: str = "l1",
-        identity_loss: str = "l1",
+        cycle_criterion: str = "l1",
+        identity_criterion: str = "l1",
         lambda_cycle: float = 10.0,
         lambda_identity: float = 5.0,
     ):
         super().__init__(
-            G_A, G_B, D_A, D_B, G_optim, D_optim, criterion, cycle_loss, identity_loss, lambda_cycle, lambda_identity, elo_training=False
+            G_A, G_B, D_A, D_B, G_optim, D_optim, criterion, cycle_criterion, identity_criterion, lambda_cycle, lambda_identity, elo_training=False
         )
 
-        self.classification_loss = nn.CrossEntropyLoss()
+        self.classification_criterion = nn.CrossEntropyLoss()
 
     def unpack_fit_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -469,18 +478,18 @@ class R2CGAN(CycleGAN):
         # Generator loss
         A2B_g_loss = self.G_criterion(A2B_logits)
         B2A_g_loss = self.G_criterion(B2A_logits)
-        A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
-        B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
-        A2A_identity_loss = self.identity_loss(A2A, A)
-        B2B_identity_loss = self.identity_loss(B2B, B)
+        A2B2A_cycle_loss = self.cycle_criterion(A2B2A, A)
+        B2A2B_cycle_loss = self.cycle_criterion(B2A2B, B)
+        A2A_identity_loss = self.identity_criterion(A2A, A)
+        B2B_identity_loss = self.identity_criterion(B2B, B)
 
         # Classification loss
-        A2B_c_loss = self.classification_loss(yA2B, yA)
-        A2B2A_c_loss = self.classification_loss(yA2B2A, yA)
-        A2A_c_loss = self.classification_loss(yA2A, yA)
-        B2A_c_loss = self.classification_loss(yB2A, yB)
-        B2A2B_c_loss = self.classification_loss(yB2A2B, yB)
-        B2B_c_loss = self.classification_loss(yB2B, yB)
+        A2B_c_loss = self.classification_criterion(yA2B, yA)
+        A2B2A_c_loss = self.classification_criterion(yA2B2A, yA)
+        A2A_c_loss = self.classification_criterion(yA2A, yA)
+        B2A_c_loss = self.classification_criterion(yB2A, yB)
+        B2A2B_c_loss = self.classification_criterion(yB2A2B, yB)
+        B2B_c_loss = self.classification_criterion(yB2B, yB)
 
         G_A_loss = A2B_g_loss + 0.1 * A2B_c_loss + (A2B2A_cycle_loss + 0.01 * A2B2A_c_loss) * self.lambda_cycle + (A2A_identity_loss + 0.02 * A2A_c_loss) * self.lambda_identity
         G_B_loss = B2A_g_loss + 0.1 * B2A_c_loss + (B2A2B_cycle_loss + 0.01 * B2A2B_c_loss) * self.lambda_cycle + (B2B_identity_loss + 0.02 * B2B_c_loss) * self.lambda_identity
@@ -590,18 +599,18 @@ class R2CGAN(CycleGAN):
             # Generator loss
             A2B_g_loss = self.G_criterion(A2B_logits)
             B2A_g_loss = self.G_criterion(B2A_logits)
-            A2B2A_cycle_loss = self.cycle_loss(A2B2A, A)
-            B2A2B_cycle_loss = self.cycle_loss(B2A2B, B)
-            A2A_identity_loss = self.identity_loss(A2A, A)
-            B2B_identity_loss = self.identity_loss(B2B, B)
+            A2B2A_cycle_loss = self.cycle_criterion(A2B2A, A)
+            B2A2B_cycle_loss = self.cycle_criterion(B2A2B, B)
+            A2A_identity_loss = self.identity_criterion(A2A, A)
+            B2B_identity_loss = self.identity_criterion(B2B, B)
 
             # Classification loss
-            A2B_c_loss = self.classification_loss(yA2B, yA)
-            A2B2A_c_loss = self.classification_loss(yA2B2A, yA)
-            A2A_c_loss = self.classification_loss(yA2A, yA)
-            B2A_c_loss = self.classification_loss(yB2A, yB)
-            B2A2B_c_loss = self.classification_loss(yB2A2B, yB)
-            B2B_c_loss = self.classification_loss(yB2B, yB)
+            A2B_c_loss = self.classification_criterion(yA2B, yA)
+            A2B2A_c_loss = self.classification_criterion(yA2B2A, yA)
+            A2A_c_loss = self.classification_criterion(yA2A, yA)
+            B2A_c_loss = self.classification_criterion(yB2A, yB)
+            B2A2B_c_loss = self.classification_criterion(yB2A2B, yB)
+            B2B_c_loss = self.classification_criterion(yB2B, yB)
 
             G_A_loss = A2B_g_loss + 0.1 * A2B_c_loss + (A2B2A_cycle_loss + 0.01 * A2B2A_c_loss) * self.lambda_cycle + (A2A_identity_loss + 0.02 * A2A_c_loss) * self.lambda_identity
             G_B_loss = B2A_g_loss + 0.1 * B2A_c_loss + (B2A2B_cycle_loss + 0.01 * B2A2B_c_loss) * self.lambda_cycle + (B2B_identity_loss + 0.02 * B2B_c_loss) * self.lambda_identity

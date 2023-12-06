@@ -13,6 +13,7 @@ class TrainingTracker:
         self.metrics = metrics if metrics is not None else {}
         self.misc = misc if misc is not None else {}
         self.comment = comment if comment is not None else ""
+        self.new_id = None
 
         # validate parameter names
         if len((self.hyperparameters.keys() | self.metrics.keys() | self.misc.keys()) & set(self.get_hidden_keys())) != 0:
@@ -64,15 +65,12 @@ class TrainingTracker:
 
     def start_training(self):
         """
-        Adds a new empty row to the config, and returns the id.
+        Create a new id for a training which will be used the next time initialize is called.
         """
         self.config = self.read_config()
-        new_id = str(self.uuid.uuid4())
-        new_row = self.get_empty_row(new_id, [""] * len(self.hyper_keys), [""] * len(self.misc_keys), "")
-        self.training_index = len(self.config)
-        self.config.loc[self.training_index] = new_row
-        self.write_config()
-        return new_id
+        self.new_id = str(self.uuid.uuid4())
+
+        return self.new_id
 
 
     def initialize_training(self, hyperparameters: dict, misc: dict=None, comment: str=None):
@@ -100,6 +98,7 @@ class TrainingTracker:
             cur_id = self.config.loc[self.training_index, "id"]
             cur_row = self.get_init_row(cur_id, hyperparameters, misc, comment)
             self.config.loc[self.training_index] = cur_row
+
         # check if we already have a training with the same config
         elif (query := self.get_query(param_values)).any():
             ans = input("A training with the same config exists. Do you want to override? (y/n)")
@@ -107,11 +106,16 @@ class TrainingTracker:
                 raise RuntimeError("Interrupted on purpose. Training is not saved.")
             self.training_index = self.config.loc[query].index[0]
             self.config.loc[self.training_index, "completed"] = False
+
         else:  # no active training and no training with the same config
             self.training_index = len(self.config)
-            new_id = str(self.uuid.uuid4())
-            new_row = self.get_init_row(new_id, hyperparameters, misc, comment)
+
+            if self.new_id is None:
+                self.new_id = str(self.uuid.uuid4())
+
+            new_row = self.get_init_row(self.new_id, hyperparameters, misc, comment)
             self.config.loc[self.training_index] = new_row
+            self.new_id = None
 
         self.write_config()
         return self.config.loc[self.training_index, "id"]
@@ -286,6 +290,7 @@ class TrainingTracker:
 
     def get_query(self, hyperparameter_values: list):
         values = [self.value_to_csv(v) for v in hyperparameter_values]
+        print(values)
         return (self.config[self.hyper_keys] == values).all(axis=1)
         
     def value_to_csv(self, value):

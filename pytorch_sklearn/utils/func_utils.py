@@ -46,14 +46,12 @@ def optimizer_to(optimizer, device):
     to the device that the module is currently on. The optimizer ALSO loads to the device that the MODULE is currently on,
     i.e. when loading a checkpoint for the optimizer, PyTorch checks the device of the module and loads the optimizer to that.
     
-    If you create the module, create the optimizer, load the checkpoint, and then move the module to a different device,
+    If you create the module, create the optimizer, load the checkpoints, and then move the module to a different device,
     the optimizer will still be on the original device. Since the optimizer will not perform the first call to ``.step()``
     (because it resumes from a checkpoint), it will not know about the module's new device.
 
-    The correct way to go about this is to create the module, move the module, create the optimizer, load the checkpoints.
-    Now, the checkpoint will load to the module's device, and the optimizer will be initialized on the module's device.
-
-    Another way would be to create the module, create the optimizer, MOVE the module to the checkpoint's device, load the checkpoints.
+    The correct way to go about this is to load the checkpoint for the optimizer only after the module has been moved to the
+    correct device. Alternatively, you can create the optimizer after the module has been moved to the correct device.
 
     These options may not always be possible (or easy), so this function is a workaround. It tries to move all parameters of the optimizer
     to the given device. Note that since PyTorch does not have a ``.to()`` method for optimizers, this function is not guaranteed
@@ -103,7 +101,7 @@ def to_tensor(X: Iterable, device=None, dtype=None, clone=True):
 
 def to_safe_tensor(X: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]], clone=True):
     """
-    Convert the given ``torch.Tensor`` to another one that is detached and is in cpu.
+    Convert the given ``torch.Tensor`` or list of tensors to another one that is detached and is in cpu.
     ``clone`` is set to True by default to mitigate side-effects that this function might cause.
     For instance:
         ``torch.Tensor.cpu`` will clone the object if it is in GPU, but won't if it is in CPU.

@@ -139,7 +139,7 @@ class NeuralNetwork:
 
         Parameters
         ----------
-        X : Any
+        X:
             All the data necessary for the model forward pass. By default, this is the first element returned from ``unpack_fit_batch``.
         '''
         return self.module(X)
@@ -151,10 +151,10 @@ class NeuralNetwork:
         
         Parameters
         ----------
-        out : torch.Tensor
+        out:
             The output of the model. By default, this is the output of ``forward``.
             
-        y : torch.Tensor
+        y:
             The target values. By default, this is the second element returned from ``unpack_fit_batch``.
         '''
         return self.criterion(out, y)
@@ -266,7 +266,7 @@ class NeuralNetwork:
 
         Parameters
         ----------
-        batch_data : Any
+        batch_data:
             Batch data as returned by the dataloader provided to ``fit``.
         '''
         X, y = self.unpack_fit_batch(batch_data)
@@ -364,12 +364,12 @@ class NeuralNetwork:
                 
         Parameters
         ----------
-        batch_data : Any
+        batch_data:
             Batch data as returned by the dataloader provided to ``predict`` or ``predict_generator``.
-        decision_func : Optional[Callable]
+        decision_func:
             Decision function passed to ``predict`` or ``predict_generator``.. If None, the output of the model is returned.
             Takes model output as input and returns the desired output.
-        **decision_func_kw
+        **decision_func_kw:
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
         X = self.unpack_predict_batch(batch_data)
@@ -434,12 +434,12 @@ class NeuralNetwork:
 
         Parameters
         ----------
-        batch_data : Any
+        batch_data:
             Batch data as returned by the dataloader provided to ``score``.
-        score_func : Optional[Callable]
+        score_func:
             Score function passed to ``score``. If None, the criterion is used by default.
             Takes a tuple of tensors ``(y_pred, y_true)`` as input and returns a scalar, tuple of scalars, tensor, or tuple of tensors.
-        **score_func_kw
+        **score_func_kw:
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
         X, y = self.unpack_score_batch(batch_data)
@@ -483,24 +483,24 @@ class NeuralNetwork:
         if isinstance(self.criterion, torch.nn.Module):
             self.criterion = self.criterion.to(device)
 
-    def load_weights(self, weight_checkpoint):
+    def load_weights(self, weight_checkpoint, strict=True):
         if self._using_original:
             self._original_state_dict = copy.deepcopy(self.get_module_weights())
-        self.load_module_weights(weight_checkpoint.best_weights)
+        self.load_module_weights(weight_checkpoint.best_weights, strict=strict)
         self._using_original = False
 
-    def load_weights_from_path(self, weight_path):
+    def load_weights_from_path(self, weight_path, strict=True):
         if self._using_original:
             self._original_state_dict = copy.deepcopy(self.get_module_weights())
         if torch.cuda.is_available():
-            self.load_module_weights(torch.load(weight_path))
+            self.load_module_weights(torch.load(weight_path), strict=strict)
         else:
-            self.load_module_weights(torch.load(weight_path, map_location=torch.device("cpu")))
+            self.load_module_weights(torch.load(weight_path, map_location=torch.device("cpu")), strict=strict)
         self._using_original = False
 
-    def load_original_weights(self):
+    def load_original_weights(self, strict=True):
         if not self._using_original and self._original_state_dict is not None:  # second condition is always true, but there for type checking.
-            self.load_module_weights(self._original_state_dict)
+            self.load_module_weights(self._original_state_dict, strict=strict)
             self._using_original = True
             self._original_state_dict = None
 
@@ -512,13 +512,15 @@ class NeuralNetwork:
         ''' Returns the state dict of all the modules that are part of this network. '''
         return self.module.state_dict()
     
-    def load_module_weights(self, state_dict):
+    def load_module_weights(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
         ''' Loads the given state dict into the modules that are part of this network. '''
         # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
         checkpoint_device = state_dict[next(iter(state_dict))].device
         self.to_device(checkpoint_device)
 
-        self.module.load_state_dict(state_dict, strict=False)
+        if map_param_names is not None:
+            state_dict = {map_param_names.get(k, k): v for k, v in state_dict.items()}
+        self.module.load_state_dict(state_dict, strict=strict)
 
     def get_module_parameters(self):
         ''' Returns all the parameters of the modules that are part of this network. '''
@@ -535,8 +537,8 @@ class NeuralNetwork:
             "batch": self._batch
         }
 
-    def load_state_dict(self, state_dict):
-        self.load_module_weights(state_dict["module_state"])
+    def load_state_dict(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
+        self.load_module_weights(state_dict["module_state"], strict=strict, map_param_names=map_param_names)
         self._original_state_dict = state_dict["original_module_state"]
         self._using_original = state_dict["using_original"]
         self.optimizer.load_state_dict(state_dict["optimizer_state"])
@@ -559,7 +561,25 @@ class NeuralNetwork:
             torch.save(d, f)
 
     @classmethod
-    def load_class(cls, net: "NeuralNetwork", callbacks: Sequence[Callback], loadpath: str):
+    def load_class(cls, net: "NeuralNetwork", callbacks: Sequence[Callback], loadpath: str, strict=True, map_param_names: Mapping[str, str] = None):
+        ''' Loads the state of the network from the given checkpoint path.
+
+        Parameters
+        ----------
+        net:
+            The network to load the state into.
+        callbacks:
+            If provided, the callbacks to load the state into. These should be the same callbacks, in the same order, as they were when the state was saved.
+            This could be an empty list, in which case the callbacks are not loaded. This is useful if only the network state is needed, e.g. for inference.
+        loadpath:
+            The path to the checkpoint file.
+        strict:
+            Same as in ``nn.Module.load_state_dict``, the keys in the checkpoint state dict must match the keys returned by this network's module's ``state_dict``.
+        map_param_names:
+            A mapping from the keys in the checkpoint state dict to the keys in this network's module's ``state_dict``. This is a convenience feature for when
+            the module's parameter names have changed since the checkpoint was saved. One can load the checkpoint by providing a mapping from the old names to the new names,
+            and save the checkpoint with the new names.
+        '''
         with open(loadpath, "rb") as f:
             map_location = None if torch.cuda.is_available() else torch.device("cpu")  # force CPU if no CUDA
             try:
@@ -569,7 +589,7 @@ class NeuralNetwork:
                 f.seek(0)
                 d = pickle.load(f)  # backwards compat last resort, likely fails if the weights are on GPU and there is no CUDA
                 
-        net.load_state_dict(d["net_state"])
+        net.load_state_dict(d["net_state"], strict=strict, map_param_names=map_param_names)
         net.callbacks = callbacks
         for i, callback in enumerate(net.callbacks):
             try:
