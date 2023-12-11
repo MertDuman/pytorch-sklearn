@@ -158,10 +158,9 @@ class CycleGANHistory(History):
 
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
         batch_out = to_safe_tensor(net._batch_out)
-        _, batch_y = net.unpack_fit_batch(net._batch_data)
         self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]
         for i, metric in enumerate(net._metrics.values(), start=4):
-            self.epoch_metrics[i] += metric(batch_out, batch_y)
+            self.epoch_metrics[i] += metric(batch_out, net._batch_data)
 
 
 class Verbose(Callback):
