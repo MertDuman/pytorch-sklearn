@@ -14,7 +14,7 @@ from pytorch_sklearn.neural_network import NeuralNetwork
 from pytorch_sklearn.utils.datasets import DefaultDataset, CUDADataset
 from pytorch_sklearn.callbacks import Callback
 from pytorch_sklearn.utils.class_utils import set_properties_hidden
-from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor
+from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, to_device
 
 
 class CycleGAN(NeuralNetwork):
@@ -126,9 +126,8 @@ class CycleGAN(NeuralNetwork):
         batch_data : Any
             Batch data as returned by the dataloader provided to ``fit``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_fit_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
 
@@ -222,9 +221,8 @@ class CycleGAN(NeuralNetwork):
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_predict_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
         return [A2B, B2A, A2B2A, B2A2B, A2A, B2B]
@@ -250,9 +248,8 @@ class CycleGAN(NeuralNetwork):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_score_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
 
@@ -459,11 +456,8 @@ class R2CGAN(CycleGAN):
         batch_data : Any
             Batch data as returned by the dataloader provided to ``fit``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_fit_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        yA = yA.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
-        yB = yB.to(self._device, non_blocking=True)
 
         A2B, yA2B = self.G_A(A)
         B2A, yB2A = self.G_B(B)
@@ -544,11 +538,8 @@ class R2CGAN(CycleGAN):
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_predict_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        yA = yA.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
-        yB = yB.to(self._device, non_blocking=True)
 
         A2B, yA2B = self.G_A(A)
         B2A, yB2A = self.G_B(B)
@@ -579,11 +570,8 @@ class R2CGAN(CycleGAN):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
+        batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_score_batch(batch_data)
-        A = A.to(self._device, non_blocking=True)
-        yA = yA.to(self._device, non_blocking=True)
-        B = B.to(self._device, non_blocking=True)
-        yB = yB.to(self._device, non_blocking=True)
 
         A2B, yA2B = self.G_A(A)
         B2A, yB2A = self.G_B(B)

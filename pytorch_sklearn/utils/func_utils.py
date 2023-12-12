@@ -1,7 +1,10 @@
 import numpy as np
 import torch
 
-from typing import Iterable, Union, List, Tuple
+from typing import Iterable, Union
+from collections import Iterable as CIterable
+
+from pytorch_sklearn.utils.custom_types import MaybeList
 
 
 def create_dirs(path):
@@ -63,6 +66,21 @@ def optimizer_to(optimizer, device):
                 param[key] = value.to(device)
 
 
+def to_device(data: MaybeList[torch.Tensor], device, non_blocking=True):
+    """
+    Moves the given data to the given device.
+    """
+    if isinstance(data, (list, tuple)):
+        return list(map(lambda x: to_device(x, device, non_blocking=non_blocking), data))
+
+    # This is for convenience, so that e.g. to_device([torch.randn(5), 10, torch.randn(2)]) works.
+    if isinstance(data, torch.Tensor):
+        return data.to(device, non_blocking=non_blocking)
+    
+    return data
+
+
+
 def to_numpy(X: torch.Tensor, clone=True):
     """
     Safely convert from PyTorch tensor to numpy.
@@ -99,7 +117,7 @@ def to_tensor(X: Iterable, device=None, dtype=None, clone=True):
     return X
 
 
-def to_safe_tensor(X: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]], clone=True):
+def to_safe_tensor(X: MaybeList[torch.Tensor], clone=True):
     """
     Convert the given ``torch.Tensor`` or list of tensors to another one that is detached and is in cpu.
     ``clone`` is set to True by default to mitigate side-effects that this function might cause.

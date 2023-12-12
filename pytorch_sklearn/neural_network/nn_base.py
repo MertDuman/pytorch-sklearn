@@ -21,23 +21,11 @@ from typing import Any, Callable, Iterable, Sequence, Mapping, Optional, Union
 
 
 """
-TODO:
-- Documentation missing.
-
-- If train_X is passed as a dataloader, then batch_size should automatically be set to the batch_size of the dataloader.
-
-- metrics should just take batch_out, batch_data as input, and not batch_out, y, because many setups don't separate X and y, e.g. Autoencoders.
-
-- Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
-  option to calculate metrics for all of the data instead of per batch.
-  Could also add a 'reduction' parameter to the metrics, e.g. 'mean' or 'sum' or 'last'.
-
-- If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
-   Maybe produce a warning which asks if we should continue training with these new weights.
+Currently not used. This is a more generic base class for neural networks.
 """
 
 
-class NeuralNetwork:
+class NeuralNetworkBase:
     def __init__(self, module: nn.Module, optimizer: _Optimizer, criterion: _Loss):
         # Base parameters
         self.module = module  # SAVED
@@ -133,7 +121,7 @@ class NeuralNetwork:
         self._notify(f"on_grad_compute_end")
         self.step_grad(optimizer)
 
-    def forward(self, X):
+    def forward(self, batch_data):
         ''' Forward pass of the model. This method should be overridden by subclasses. 
 
         The default implementation simply calls the module.
@@ -143,9 +131,9 @@ class NeuralNetwork:
         X:
             All the data necessary for the model forward pass. By default, this is the first element returned from ``unpack_fit_batch``.
         '''
-        return self.module(X)
+        return self.module(batch_data)
     
-    def compute_loss(self, out, y):
+    def compute_loss(self, batch_out, batch_data):
         ''' Computes the loss of the model. This method should be overridden by subclasses.
 
         The default implementation simply calls the criterion.
@@ -158,7 +146,7 @@ class NeuralNetwork:
         y:
             The target values. By default, this is the second element returned from ``unpack_fit_batch``.
         '''
-        return self.criterion(out, y)
+        return self.criterion(batch_out, batch_data)
 
     # Model Modes
     def train(self):
@@ -201,9 +189,6 @@ class NeuralNetwork:
         if max_epochs == -1:
             max_epochs = float("inf") # type: ignore
             warnings.warn("max_epochs is set to -1. Make sure to pass an early stopping method.")
-
-        if isinstance(train_X, DataLoader):
-            batch_size = train_X.batch_size
 
         #  Set fit class parameters
         fit_params = locals().copy()
@@ -274,10 +259,9 @@ class NeuralNetwork:
             Batch data as returned by the dataloader provided to ``fit``.
         '''
         batch_data = to_device(batch_data, self._device)
-        X, y = self.unpack_fit_batch(batch_data)
-        out = self.forward(X)
-        loss = self.compute_loss(out, y)
-        return out, loss
+        batch_out = self.forward(batch_data)
+        batch_loss = self.compute_loss(batch_out, batch_data)
+        return batch_out, batch_loss
 
     def predict(
         self,
@@ -376,11 +360,10 @@ class NeuralNetwork:
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
         batch_data = to_device(batch_data, self._device)
-        X = self.unpack_predict_batch(batch_data)
-        out = self.forward(X)
+        batch_out = self.forward(batch_data)
         if decision_func is not None:
-            out = decision_func(out, **decision_func_kw)
-        return out
+            batch_out = decision_func(batch_out, **decision_func_kw)
+        return batch_out
 
     def score(
         self,
@@ -446,13 +429,12 @@ class NeuralNetwork:
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
         batch_data = to_device(batch_data, self._device)
-        X, y = self.unpack_score_batch(batch_data)
-        out = self.module(X)
+        batch_out = self.forward(batch_data)
         
         if score_func is None:
-            score = self.compute_loss(out, y).item()
+            score = self.compute_loss(batch_out, batch_data).item()
         else:
-            score = score_func(self._to_safe_tensor(out), self._to_safe_tensor(y), **score_func_kw)
+            score = score_func(self._to_safe_tensor(batch_out), self._to_safe_tensor(batch_data), **score_func_kw)
         return score
 
     def get_dataloader(self, X: TorchDataset, y: Optional[torch.Tensor], shuffle):
@@ -549,7 +531,7 @@ class NeuralNetwork:
         self._batch = state_dict["batch"]
 
     @classmethod
-    def save_class(cls, net: "NeuralNetwork", savepath: str):
+    def save_class(cls, net: "NeuralNetworkBase", savepath: str):
         d = {
             "net_state": net.state_dict(),
             "callbacks": []
@@ -563,7 +545,7 @@ class NeuralNetwork:
             torch.save(d, f)
 
     @classmethod
-    def load_class(cls, net: "NeuralNetwork", callbacks: Sequence[Callback], loadpath: str, strict=True, map_param_names: Mapping[str, str] = None):
+    def load_class(cls, net: "NeuralNetworkBase", callbacks: Sequence[Callback], loadpath: str, strict=True, map_param_names: Mapping[str, str] = None):
         ''' Loads the state of the network from the given checkpoint path.
 
         Parameters
