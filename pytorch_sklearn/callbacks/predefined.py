@@ -164,7 +164,7 @@ class CycleGANHistory(History):
 
 
 class Verbose(Callback):
-    def __init__(self, verbose=4, notebook=False, old_version=False):
+    def __init__(self, verbose=3, per_batch=True, notebook=False, old_version=False):
         """
         Prints the following training information:
             - Current Epoch / Total Epochs
@@ -175,18 +175,25 @@ class Verbose(Callback):
 
         Parameters
         ----------
-        verbose : int
+        verbose:
             Controls how much is printed. Higher levels include the info from lower levels.
             The following levels are valid:
-                0: Current Epoch / Total Epochs
-                1: Current Batch / Total Batches
-                2: Loss
-                3: Metrics
-                4: Total Time + ETA
+                0: Only Batch or Epoch
+                1: Loss
+                2: Metrics
+                3: Total Time + ETA
+        per_batch:
+            Whether to print the info per batch or per epoch.
+        notebook:
+            Whether the training is done in a Jupyter Notebook or not.
+        old_version:
+            For development only, ignore.
         """
         super().__init__()
         self.name = "Verbose"
         self.verbose = verbose
+        self.per_batch = per_batch
+        self.per_epoch = not per_batch
         self.notebook = notebook
         self.old_version = old_version
 
@@ -206,42 +213,59 @@ class Verbose(Callback):
         try: self.prev_epochs = len(net.history.track[next(iter(net.history.track))])
         except: pass
 
-    def on_train_epoch_begin(self, net):
-        if self.verbose == 0:
-            print(f"Epoch {self.prev_epochs + net._epoch}/{self.prev_epochs + net._max_epochs}", end='\r', flush=True)  # TODO: Bug, no newline sometimes
-        else:
-            print(f"Epoch {self.prev_epochs + net._epoch}/{self.prev_epochs + net._max_epochs}")
-
-        if self.verbose >= 4:
+        if self.verbose >= 3 and self.per_epoch:
             self.start_time = time.perf_counter()
 
+    def on_train_epoch_begin(self, net):
+        if self.per_batch:
+            print(f"Epoch {self.prev_epochs + net._epoch}/{self.prev_epochs + net._max_epochs}")
+
+            if self.verbose >= 3:
+                self.start_time = time.perf_counter()
+
+    def on_train_epoch_end(self, net):
+        if self.per_epoch:
+            # Fill print data
+            opt = None
+            if self.verbose >= 1:
+                # Train loss is always the first key in track
+                train_loss = net.history.track[next(iter(net.history.track))][-1]
+                opt = [f"{net._pass_type}_loss: {train_loss:.3f}"]
+            if self.verbose >= 2:
+                opt.extend([f"{net._pass_type}_{name}: {net.history.track[f'{net._pass_type}_{name}'][-1]:.3f}" for name in net._metrics.keys()])
+            if self.verbose >= 3:
+                self.end_time = time.perf_counter()
+                self.total_time = self.end_time - self.start_time
+                self.rem_time = ((net._max_epochs - net._epoch) * self.total_time) / net._max_epochs
+                opt.extend([f"Time: {self.total_time:.2f}", f"ETA: {self.rem_time:.2f}"])
+            print_progress(self.prev_epochs + net._epoch, self.prev_epochs + net._max_epochs, pre='Epoch ', opt=opt, notebook=self.notebook, old_version=self.old_version)
+
     def on_val_epoch_begin(self, net):
-        if self.verbose >= 4:
+        if self.verbose >= 3 and self.per_batch:
             self.start_time = time.perf_counter()
 
     def on_train_batch_end(self, net):
-        if self.verbose >= 1:
+        if self.per_batch:
             self._print(net)
 
     def on_val_batch_end(self, net):
-        if self.verbose >= 1:
+        if self.per_batch:
             self._print(net)
 
     def _print(self, net):
         # Calculate data
         epoch_metrics = net.history.epoch_metrics / net._batch  # mean batch loss
-        if self.verbose >= 4:
+
+        # Fill print data
+        opt = None
+        if self.verbose >= 1:
+            opt = [f"{net._pass_type}_loss: {epoch_metrics[0]:.3f}"]
+        if self.verbose >= 2:
+            opt.extend([f"{net._pass_type}_{name}: {epoch_metrics[net.history.key_index[f'{net._pass_type}_{name}']]:.3f}" for name in net._metrics.keys()])
+        if self.verbose >= 3:
             self.end_time = time.perf_counter()
             self.total_time = self.end_time - self.start_time
             self.rem_time = ((net._num_batches - net._batch) * self.total_time) / net._batch
-
-        # Fill print data
-        opt = []
-        if self.verbose >= 2:
-            opt = [f"{net._pass_type}_loss: {epoch_metrics[0]:.3f}"]
-        if self.verbose >= 3:
-            opt.extend([f"{net._pass_type}_{name}: {epoch_metrics[i]:.3f}" for i, name in enumerate(net._metrics.keys(), start=1)])
-        if self.verbose >= 4:
             opt.extend([f"Time: {self.total_time:.2f}", f"ETA: {self.rem_time:.2f}"])
         print_progress(net._batch, net._num_batches, opt=opt, notebook=self.notebook, old_version=self.old_version)
 

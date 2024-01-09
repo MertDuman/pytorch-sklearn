@@ -197,7 +197,7 @@ class CycleGAN(NeuralNetwork):
                 self.G_elo += (G_wins > 0) - (G_losses > 0)
                 self.D_elo += (D_wins > 0) - (D_losses > 0)
         
-        return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
+        return [A2B, B2A, A2B2A, B2A2B, A2A, B2B], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
     
     def unpack_predict_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -290,7 +290,7 @@ class CycleGAN(NeuralNetwork):
 
             score = [G_A_loss.item(), G_B_loss.item(), D_A_loss.item(), D_B_loss.item()]
         else:
-            score = score_func(self._to_safe_tensor([A, B, A2B, B2A, A2B2A, B2A2B, A2A, B2B]), **score_func_kw)
+            score = score_func(self._to_safe_tensor([A2B, B2A, A2B2A, B2A2B, A2A, B2B]), self._to_safe_tensor(batch_data), **score_func_kw)
         return score
     
     def to_device(self, device):
@@ -514,7 +514,7 @@ class R2CGAN(CycleGAN):
         if self._pass_type == "train":
             self.backward(D_loss, self.D_optim)
         
-        return [A2B, B2A], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
+        return [A2B, yA2B, B2A, yB2A, A2B2A, yA2B2A, B2A2B, yB2A2B, A2A, yA2A, B2B, yB2B], [G_A_loss, G_B_loss, D_A_loss, D_B_loss]
 
     def unpack_predict_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -547,7 +547,7 @@ class R2CGAN(CycleGAN):
         B2A2B, yB2A2B = self.G_A(B2A)
         A2A, yA2A = self.G_B(A)
         B2B, yB2B = self.G_A(B)
-        return [A2B, B2A, A2B2A, B2A2B, A2A, B2B]
+        return [A2B, yA2B, B2A, yB2A, A2B2A, yA2B2A, B2A2B, yB2A2B, A2A, yA2A, B2B, yB2B]
 
     def unpack_score_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''
@@ -625,5 +625,5 @@ class R2CGAN(CycleGAN):
 
             score = [G_A_loss.item(), G_B_loss.item(), D_A_loss.item(), D_B_loss.item()]
         else:
-            score = score_func(self._to_safe_tensor([A, B, A2B, B2A, A2B2A, B2A2B, A2A, B2B]), **score_func_kw)
+            score = score_func(self._to_safe_tensor([A2B, yA2B, B2A, yB2A, A2B2A, yA2B2A, B2A2B, yB2A2B, A2A, yA2A, B2B, yB2B]), self._to_safe_tensor(batch_data), **score_func_kw)
         return score

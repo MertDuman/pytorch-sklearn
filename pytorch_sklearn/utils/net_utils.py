@@ -24,6 +24,7 @@ def try_load_network_from_csv(
     device: str = None,
     net_class: Type[NeuralNetwork] = NeuralNetwork,
     supress_warnings: bool = False,
+    strict: bool = True
 ): 
     '''
     Tries to load the neural network from a csv file.
@@ -133,11 +134,11 @@ def try_load_network_from_csv(
     net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
     weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
     
-    net_class.load_class(net, callbacks, net_path)
+    net_class.load_class(net, callbacks, net_path, strict=strict)
 
     if load_best:
         try:
-            net.load_weights_from_path(weight_path)
+            net.load_weights_from_path(weight_path, strict=strict)
         except:
             if not supress_warnings: print('Did not find best weights, using original.')
 
@@ -551,8 +552,9 @@ def _try_load_cyclegan_from_csv(
             D_A_optim = optim_classes[1](list(D_A.parameters()) + list(D_B.parameters()))
 
     try:
-        gan_params = ast.literal_eval(row[column_mapper['gan_params']])
+        gan_params = ast.literal_eval(row[column_mapper.get('gan_params', 'gan_params')])
     except:
+        if not supress_warnings: print('No constructor found for the network, using default.')
         gan_params = {}
 
     net = cyclegan_class(G_A, G_B, D_A, D_B, G_A_optim, D_A_optim, **gan_params)
