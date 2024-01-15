@@ -17,6 +17,159 @@ from pytorch_sklearn.utils.class_utils import set_properties_hidden
 from pytorch_sklearn.utils.func_utils import to_tensor, to_safe_tensor, to_device
 
 
+
+
+class GAN(NeuralNetwork):
+    """
+    Implements GAN from the paper: https://arxiv.org/pdf/1406.2661.pdf
+
+    Parameters
+    ----------
+    G : PyTorch module
+        Generator that converts noise to fake.
+    D : PyTorch module
+        Discriminator that classifies input as real or fake.
+    G_optim : PyTorch optimizer
+        Updates the weights of the generator.
+    D_optim : PyTorch optimizer
+        Updates the weights of the discriminator.
+    """
+    def __init__(
+        self, 
+        G: nn.Module,
+        D: nn.Module,
+        G_optim: _Optimizer, 
+        D_optim: _Optimizer,
+        criterion: nn.Module,
+    ):
+        # Base parameters
+        self.G = G                  # SAVED
+        self.D = D                  # SAVED
+        self.G_optim = G_optim      # SAVED
+        self.D_optim = D_optim      # SAVED
+        self.criterion = criterion  # SAVED
+
+        # Maintenance parameters
+        self._callbacks: Sequence[Callback] = [History()]               # SAVED
+        self._using_original = True                                     # SAVED
+        self._original_state_dict: Optional[Mapping[str, Any]] = None   # SAVED
+        self.keep_training = True
+        self.custom_backward = True                 # If true, then the user must call backward themselves.
+        self.loss_names = ["G_loss", "D_loss"]      # If the loss is a tuple, then this should be a list of the names of the losses.
+
+    def forward(self, X):
+        return self.G(X)
+    
+    def fit_batch(self, batch_data):
+        batch_data = to_device(batch_data, self._device)
+        noise, real = self.unpack_fit_batch(batch_data)
+
+        fake = self.forward(noise)
+        fake_logits = self.D(fake.detach())  # Detach so that gradients don't flow to G
+        real_logits = self.D(real)
+        fake_loss = self.criterion(fake_logits, torch.zeros_like(fake_logits))
+        real_loss = self.criterion(real_logits, torch.ones_like(real_logits))
+        D_loss = fake_loss + real_loss
+
+        if self._pass_type == "train":
+            self.backward(D_loss, self.D_optim)
+
+        fake_g_logits = self.D(fake)
+        G_loss = self.criterion(fake_g_logits, torch.ones_like(fake_g_logits))
+
+        if self._pass_type == "train":
+            self.backward(G_loss, self.G_optim)
+
+        return [fake, fake_g_logits], [G_loss, D_loss]
+    
+    def predict_batch(self, batch_data, decision_func = None, **decision_func_kw):
+        batch_data = to_device(batch_data, self._device)
+        noise = self.unpack_predict_batch(batch_data)
+
+        fake = self.forward(noise)
+        fake_logits = self.D(fake)
+        return [fake, fake_logits]
+        
+    def score_batch(self, batch_data, score_func = None, **score_func_kw):
+        batch_data = to_device(batch_data, self._device)
+        noise, real = self.unpack_score_batch(batch_data)
+
+        fake = self.forward(noise)
+        fake_logits = self.D(fake)
+        real_logits = self.D(real)
+        if score_func is None:
+            fake_loss = self.criterion(fake_logits, torch.zeros_like(fake_logits))
+            real_loss = self.criterion(real_logits, torch.ones_like(real_logits))
+            score = [fake_loss.item(), real_loss.item()]
+        else:
+            score = score_func(self._to_safe_tensor([fake, fake_logits]), self._to_safe_tensor(batch_data), **score_func_kw)
+        return score
+
+    def to_device(self, device):
+        self.G = self.G.to(device)
+        self.D = self.D.to(device)
+        
+    # Model Modes
+    def train(self):
+        self.G.train()
+        self.D.train()
+        self._pass_type = "train"
+
+    def val(self):
+        self.G.eval()
+        self.D.eval()
+        self._pass_type = "val"
+
+    def test(self):
+        self.G.eval()
+        self.D.eval()
+        self._pass_type = "test"
+
+    def get_module_weights(self):
+        return {
+            "G_state": self.G.state_dict(),
+            "D_state": self.D.state_dict(),
+        }
+    
+    def load_module_weights(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
+        # Workaround for optimizer being on the wrong device. Check ``func_utils.optimizer_to`` for more info.
+        checkpoint_device = state_dict["G_state"][next(iter(state_dict["G_state"]))].device
+        self.to_device(checkpoint_device)
+
+        if map_param_names is not None:
+            state_dict = {map_param_names.get(k, k): v for k, v in state_dict.items()}
+
+        self.G.load_state_dict(state_dict["G_state"], strict=strict)
+        self.D.load_state_dict(state_dict["D_state"], strict=strict)
+
+    def get_module_parameters(self):
+        yield from self.G.parameters()
+        yield from self.D.parameters()
+
+    def state_dict(self):
+        return {
+            **self.get_module_weights(),
+            "original_module_state": self._original_state_dict,
+            "using_original": self._using_original,
+            "G_optim_state": self.G_optim.state_dict(),
+            "D_optim_state": self.D_optim.state_dict(),
+            "criterion_state": self.criterion.state_dict(),
+            "epoch": self._epoch,
+            "batch": self._batch
+        }
+
+    def load_state_dict(self, state_dict, strict=True, map_param_names: Mapping[str, str] = None):
+        self.load_module_weights(state_dict, strict=strict, map_param_names=map_param_names)
+        self._original_state_dict = state_dict["original_module_state"]
+        self._using_original = state_dict["using_original"]
+        self.G_optim.load_state_dict(state_dict["G_optim_state"])
+        self.D_optim.load_state_dict(state_dict["D_optim_state"])
+        self.criterion.load_state_dict(state_dict["criterion_state"])
+        self._epoch = state_dict["epoch"]
+        self._batch = state_dict["batch"]
+
+
+
 class CycleGAN(NeuralNetwork):
     """
     Implements CycleGAN from the paper: https://github.com/junyanz/CycleGAN
@@ -80,6 +233,8 @@ class CycleGAN(NeuralNetwork):
         self._using_original = True  # SAVED
         self._original_state_dict: Optional[Mapping[str, Any]] = None # SAVED
         self.keep_training = True
+        self.custom_backward = True
+        self.loss_names = ["G_A_loss", "G_B_loss", "D_A_loss", "D_B_loss"]
 
         self.G_elo = 0
         self.D_elo = 0
@@ -98,17 +253,6 @@ class CycleGAN(NeuralNetwork):
         A2A = self.G_B(A)
         B2B = self.G_A(B)
         return A2B, B2A, A2B2A, B2A2B, A2A, B2B
-
-    def fit_epoch(self, data_loader):
-        self._num_batches = len(data_loader)
-        self._notify(f"on_{self._pass_type}_epoch_begin")
-        for self._batch, self._batch_data in enumerate(data_loader, start=1):
-            self._notify(f"on_{self._pass_type}_batch_begin")
-
-            self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
-
-            self._notify(f"on_{self._pass_type}_batch_end")
-        self._notify(f"on_{self._pass_type}_epoch_end")
     
     def unpack_fit_batch(self, batch_data):
         ''' In CycleGAN setup, we have no inputs, but only two targets: A and B. '''

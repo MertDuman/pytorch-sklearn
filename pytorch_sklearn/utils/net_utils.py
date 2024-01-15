@@ -3,7 +3,7 @@ from os.path import join as osj
 import pandas as pd
 import torch
 from pytorch_sklearn import NeuralNetwork
-from pytorch_sklearn.neural_network.generative_network import CycleGAN, R2CGAN
+from pytorch_sklearn.neural_network.generative_network import CycleGAN, R2CGAN, GAN
 from pytorch_sklearn.callbacks import Callback
 
 from typing import Mapping, Iterable, Type
@@ -455,13 +455,13 @@ def _try_load_cyclegan_from_csv(
     optimizers = ast.literal_eval(optimizers)
 
     model_classes = []
-    optim_classes = []
     for model_name in models.values():
         for k in module_list:
             model_class = getattr(sys.modules[k], model_name, [])
             if model_class != []:
                 model_classes.append(model_class)
                 break
+    optim_classes = []
     for optim_name in optimizers.values():
         for k in module_list:
             optim_class = getattr(sys.modules[k], optim_name, [])
@@ -575,5 +575,219 @@ def _try_load_cyclegan_from_csv(
             net.load_weights_from_path(weight_path)
         except:
             if not supress_warnings: print('Did not find best weights, using original.')
+
+    return net
+
+
+
+
+
+
+
+
+def try_load_gan_from_csv(
+    csv_folder: str, 
+    csv_filename: str,
+    idx: int,
+    column_mapper: Mapping[str, str] = None,
+    net_path: str = None,
+    load_best: str = False,
+    weight_path: str = None,
+    relative_path: bool = True,
+    callbacks: Iterable[Callback] = None,
+    module_list: Iterable[str] = None,
+    device: str = None,
+    gan_class = GAN,
+    supress_warnings: bool = False,
+    raise_errors: bool = False
+): 
+    '''
+    Tries to load the GAN network from a csv file.
+
+    Parameters
+    ----------
+    csv_folder : str
+        Path to the folder containing the csv file.
+    csv_filename : str
+        Filename without path prefixes.
+    idx : int
+        Index of the row in the csv file.
+    column_mapper : dict of str to str
+        Maps the column names in the csv file to the necessary arguments to build a NeuralNetwork.
+
+        These keys are necessary:
+            - models: class name of the model
+            - optimizers: class name of the optimizer
+        If not given, assumes the column names are 'models' and 'optimizers'.
+
+        These keys are likely needed:
+            - id: A unique identifier for the network. This csv row has a unique id that links to a folder within csv_folder.
+            - constructors: dictionary of arguments to pass to the models. If not present, assumes no arguments.
+            - optim_constructors: dictionary of arguments to pass to the optimizers. If not present, assumes no arguments.
+            - lr: learning rate to pass to the optimizers. Some optimizers require a learning rate, like SGD.
+            - gan_params: Dictionary of arguments to pass to R2CGAN. If not present, assumes no arguments.
+
+    net_path : str
+        Path to the network file. By default will look for `os.path.join(csv_folder, net.pth)`.
+    load_best : bool
+        If True, will try to load the best weights from weight_path.
+    weight_path : str
+        Path to the weight file. By default will look for `os.path.join(csv_folder, weights.pth)`.
+    relative_path : bool
+        Whether net and weight path are relative within the csv folder, or the full path. If True, will look for `os.path.join(csv_folder, net_path)`.
+        Otherwise, will look for `net_path`.
+    callbacks : list of Callbacks
+        Will be passed to the NeuralNetwork.load_class method, and callback states will be instantiated.
+    module_list : list of str
+        List of modules to look for the model, optimizer, and criterion classes in.
+        If not passed, will look for the classes in all imported modules. This may cause name clashes and take more time.
+    device : str
+        Device to load the network to. If not passed, will use 'cuda' if available, else 'cpu'.
+    '''
+    import sys
+    callbacks = [] if callbacks is None else callbacks
+    module_list = sys.modules.copy() if module_list is None else module_list
+    column_mapper = column_mapper if column_mapper is not None else {}
+
+    csv_file = pd.read_csv(osj(csv_folder, csv_filename), index_col=0, keep_default_na=False)
+    
+    row = csv_file.iloc[idx]
+    models = row[column_mapper.get('models', 'models')]
+    optimizers = row[column_mapper.get('optimizers', 'optimizers')]
+    criterion = row[column_mapper.get('criterion', 'criterion')]
+
+    models = ast.literal_eval(models)
+    optimizers = ast.literal_eval(optimizers)
+
+    model_classes = []
+    for model_name in models.values():
+        for k in module_list:
+            model_class = getattr(sys.modules[k], model_name, [])
+            if model_class != []:
+                model_classes.append(model_class)
+                break
+    optim_classes = []
+    for optim_name in optimizers.values():
+        for k in module_list:
+            optim_class = getattr(sys.modules[k], optim_name, [])
+            if optim_class != []:
+                optim_classes.append(optim_class)
+                break
+    crit_class = None
+    for k in module_list:
+        crit_class = getattr(sys.modules[k], criterion, crit_class)
+
+    class_set = set([model_class.__name__ for model_class in model_classes])
+    model_set = set(models.values())
+    assert class_set == model_set, f'Could not find model classes {model_set - class_set}'
+    class_set = set([optim_class.__name__ for optim_class in optim_classes])
+    optim_set = set(optimizers.values())
+    assert class_set == optim_set, f'Could not find optimizer classes {optim_set - class_set}'
+    assert crit_class is not None, f'Could not find criterion class {crit_name}'
+
+    try:
+        constructors = ast.literal_eval(row[column_mapper.get('model_ctors', 'model_ctors')])  # :)
+        try:
+            G = model_classes[0](**constructors['G'])
+        except:
+            if not supress_warnings: print('No constructor found for G, using default.')
+            G = model_classes[0]()
+            if raise_errors: raise
+        try:
+            D = model_classes[1](**constructors['D'])
+        except:
+            if not supress_warnings: print('No constructor found for D, using default.')
+            D = model_classes[1]()
+            if raise_errors: raise
+    except:
+        if not supress_warnings: print('No constructors found, using default.')
+        G = model_classes[0]()
+        D = model_classes[1]()
+        if raise_errors: raise
+        
+    get_device = lambda: 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = device if device is not None else get_device()
+    G.to(device), D.to(device)
+
+    lr = None
+    try:
+        lr = row[column_mapper['lr']]
+    except:
+        pass
+
+    try:
+        constructors = ast.literal_eval(row[column_mapper.get('optimizer_ctors', 'optimizer_ctors')])  # :)
+        try:
+            G_optim_constructor = constructors['G_optim']
+            if lr is not None:
+                G_optim = optim_classes[0](G.parameters(), lr=lr, **G_optim_constructor)
+            else:
+                G_optim = optim_classes[0](G.parameters(), **G_optim_constructor)
+        except:
+            if not supress_warnings: print('No constructor found for G_optim, using default.')
+            if lr is not None:
+                G_optim = optim_classes[0](G.parameters(), lr=lr)
+            else:
+                G_optim = optim_classes[0](G.parameters())
+            if raise_errors: raise
+
+        try:
+            D_optim_constructor = constructors['D_optim']
+            if lr is not None:
+                D_optim = optim_classes[1](D.parameters(), lr=lr, **D_optim_constructor)
+            else:
+                D_optim = optim_classes[1](D.parameters(), **D_optim_constructor)
+        except:
+            if not supress_warnings: print('No constructor found for D_optim, using default.')
+            if lr is not None:
+                D_optim = optim_classes[1](D.parameters(), lr=lr)
+            else:
+                D_optim = optim_classes[1](D.parameters())
+            if raise_errors: raise
+    except: 
+        if not supress_warnings: print('No constructor found for optimizers, using default.')
+        if lr is not None:
+            G_optim = optim_classes[0](G.parameters(), lr=lr)
+            D_optim = optim_classes[1](D.parameters(), lr=lr)
+        else:
+            G_optim = optim_classes[0](G.parameters())
+            D_optim = optim_classes[1](D.parameters())
+        if raise_errors: raise
+
+    try:
+        constructor = ast.literal_eval(row[column_mapper.get('criterion_ctor', 'criterion_ctor')])  # :)
+        crit = crit_class(**constructor)
+    except:
+        if not supress_warnings: print('Could not find criterion constructor, using default.')
+        crit = crit_class()
+        if raise_errors: raise
+
+    try:
+        net_ctor = ast.literal_eval(row[column_mapper.get('net_ctor', 'net_ctor')])
+    except:
+        if not supress_warnings: print('No constructor found for the network, using default.')
+        net_ctor = {}
+        if raise_errors: raise
+
+    net = gan_class(G, D, G_optim, D_optim, crit, **net_ctor)
+
+    try:
+        id = row[column_mapper.get('id', 'id')]
+        unique_folder = osj(csv_folder, id)
+    except:
+        unique_folder = csv_folder
+        if raise_errors: raise
+
+    net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
+    weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
+    
+    gan_class.load_class(net, callbacks, net_path)
+
+    if load_best:
+        try:
+            net.load_weights_from_path(weight_path)
+        except:
+            if not supress_warnings: print('Did not find best weights, using original.')
+            if raise_errors: raise
 
     return net

@@ -29,6 +29,8 @@ from collections import Iterable as CIterable
 from typing import Iterable, Union, List
 from pytorch_sklearn.utils.func_utils import to_device
 
+
+### Neural Network ###
 # %%
 model = nn.Sequential(
     nn.Conv2d(3, 128, 3, padding=1),
@@ -87,6 +89,9 @@ plt.imshow(to_safe_tensor(y[0]).permute(1, 2, 0))
 plt.title('y')
 plt.axis('off')
 plt.show()
+
+
+### CycleGAN ###
 
 # %%
 class AbsModule(nn.Module):
@@ -190,4 +195,7 @@ plt.plot(cyclegan._metrics['std'].stdB2A, label='B2A')
 plt.legend()
 plt.show()
 
+
+### GAN ###
 # %%
+nn.ConvTranspose2d( 1, 3 * 8, 4, 1, 0)(torch.randn(1, 1, 1, 1)).shape

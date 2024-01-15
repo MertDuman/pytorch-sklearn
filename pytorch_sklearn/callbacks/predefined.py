@@ -43,22 +43,26 @@ class History(Callback):
         self.session = -1
 
     def init_track(self, net, pass_type):
-        if f"{pass_type}_loss" not in self.track:
-            self.track[f"{pass_type}_loss"] = []
-            self.key_index[f"{pass_type}_loss"] = 0
-        for i, name in enumerate(net._metrics.keys(), start=1):
+        # Register losses returned from fit_batch
+        for i, name in enumerate(net.loss_names):
+            if f"{pass_type}_{name}" not in self.track:
+                self.track[f"{pass_type}_{name}"] = []
+                self.key_index[f"{pass_type}_{name}"] = i
+
+        # Register metrics
+        for i, name in enumerate(net._metrics.keys(), start=len(net.loss_names)):
             if f"{pass_type}_{name}" not in self.track:
                 self.track[f"{pass_type}_{name}"] = []
                 self.key_index[f"{pass_type}_{name}"] = i
 
     def on_fit_begin(self, net):
         self.session += 1
-        self.num_metrics = len(net._metrics) + 1
+        self.num_metrics = len(net._metrics) + len(net.loss_names)
         self.init_track(net, "train")
         if net._validate:
             self.init_track(net, "val")
         session_start = len(self.track[next(iter(self.track))]) + 1  # new session starts at epoch = len(first_key) + 1
-        self.sessions.append(session_start)  
+        self.sessions.append(session_start)
 
     def on_train_epoch_begin(self, net):
         self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics, this is possible because dict keys are ordered in Python 3.7
@@ -74,8 +78,13 @@ class History(Callback):
 
     def _save_metrics(self, net):
         self.epoch_metrics = self.epoch_metrics / net._num_batches
-        self.track[f"{net._pass_type}_loss"].append(self.epoch_metrics[0])
-        for i, name in enumerate(net._metrics.keys(), start=1):
+
+        # Save losses returned from fit_batch
+        for i, name in enumerate(net.loss_names):
+            self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
+            
+        # Save metrics
+        for i, name in enumerate(net._metrics.keys(), start=len(net.loss_names)):
             self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
 
     def on_train_batch_end(self, net):
@@ -86,8 +95,15 @@ class History(Callback):
 
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
         batch_out = to_safe_tensor(net._batch_out)
-        self.epoch_metrics[0] += net._batch_loss.item()
-        for i, metric in enumerate(net._metrics.values(), start=1):
+        # TODO: A better fix for this - fails when user returns a tuple even if there is a single loss.
+        batch_loss = net._batch_loss if len(net.loss_names) > 1 else (net._batch_loss, )
+
+        # Calculate losses returned from fit_batch
+        for i, name in enumerate(net.loss_names):
+            self.epoch_metrics[i] += batch_loss[i].item()
+            
+        # Calculate metrics
+        for i, metric in enumerate(net._metrics.values(), start=len(net.loss_names)):
             self.epoch_metrics[i] += metric(batch_out, net._batch_data)
 
 
@@ -127,19 +143,7 @@ class CycleGANHistory(History):
         if net._validate:
             self.init_track(net, "val")
         session_start = len(self.track[next(iter(self.track))]) + 1  # new session starts at epoch = len(first_key) + 1
-        self.sessions.append(session_start)  
-
-    def on_train_epoch_begin(self, net):
-        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics, this is possible because dict keys are ordered in Python 3.7
-
-    def on_val_epoch_begin(self, net):
-        self.epoch_metrics = np.zeros(self.num_metrics)  # reset epoch metrics
-
-    def on_train_epoch_end(self, net):
-        self._save_metrics(net)
-
-    def on_val_epoch_end(self, net):
-        self._save_metrics(net)
+        self.sessions.append(session_start)
 
     def _save_metrics(self, net):
         self.epoch_metrics = self.epoch_metrics / net._num_batches
@@ -150,16 +154,10 @@ class CycleGANHistory(History):
         for i, name in enumerate(net._metrics.keys(), start=4):
             self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
 
-    def on_train_batch_end(self, net):
-        self._calculate_metrics(net)
-
-    def on_val_batch_end(self, net):
-        self._calculate_metrics(net)
-
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
         batch_out = to_safe_tensor(net._batch_out)
-        self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]
-        for i, metric in enumerate(net._metrics.values(), start=4):
+        self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]  # 0:4 diff from History
+        for i, metric in enumerate(net._metrics.values(), start=4):  # 1 -> 4 diff from History
             self.epoch_metrics[i] += metric(batch_out, net._batch_data)
 
 
@@ -228,12 +226,16 @@ class Verbose(Callback):
             # Fill print data
             opt = None
             if self.verbose >= 1:
-                # Train loss is always the first key in track
-                train_loss = net.history.track[next(iter(net.history.track))][-1]
-                opt = [f"{net._pass_type}_loss: {train_loss:.3f}"]
+                # Print losses returned from fit_batch
+                opt = []
+                for i, name in enumerate(net.loss_names):
+                    lossval = net.history.track[f"{net._pass_type}_{name}"][-1]
+                    opt.append(f"{net._pass_type}_{name}: {lossval:.3f}")
             if self.verbose >= 2:
+                # Print metrics
                 opt.extend([f"{net._pass_type}_{name}: {net.history.track[f'{net._pass_type}_{name}'][-1]:.3f}" for name in net._metrics.keys()])
             if self.verbose >= 3:
+                # Print time info
                 self.end_time = time.perf_counter()
                 self.total_time = self.end_time - self.start_time
                 self.rem_time = ((net._max_epochs - net._epoch) * self.total_time) / net._max_epochs
@@ -259,10 +261,13 @@ class Verbose(Callback):
         # Fill print data
         opt = None
         if self.verbose >= 1:
-            opt = [f"{net._pass_type}_loss: {epoch_metrics[0]:.3f}"]
+            # Print losses returned from fit_batch
+            opt = [f"{net._pass_type}_{name}: {epoch_metrics[i]:.3f}" for i, name in enumerate(net.loss_names)]
         if self.verbose >= 2:
+            # Print metrics
             opt.extend([f"{net._pass_type}_{name}: {epoch_metrics[net.history.key_index[f'{net._pass_type}_{name}']]:.3f}" for name in net._metrics.keys()])
         if self.verbose >= 3:
+            # Print time info
             self.end_time = time.perf_counter()
             self.total_time = self.end_time - self.start_time
             self.rem_time = ((net._num_batches - net._batch) * self.total_time) / net._batch

@@ -40,15 +40,17 @@ TODO:
 class NeuralNetwork:
     def __init__(self, module: nn.Module, optimizer: _Optimizer, criterion: _Loss):
         # Base parameters
-        self.module = module  # SAVED
+        self.module = module        # SAVED
         self.optimizer = optimizer  # SAVED
         self.criterion = criterion  # SAVED
 
         # Maintenance parameters
-        self._callbacks: Sequence[Callback] = [History()]  # SAVED
-        self._using_original = True  # SAVED
-        self._original_state_dict: Optional[Mapping[str, Any]] = None # SAVED
+        self._callbacks: Sequence[Callback] = [History()]               # SAVED
+        self._using_original = True                                     # SAVED
+        self._original_state_dict: Optional[Mapping[str, Any]] = None   # SAVED
         self.keep_training = True
+        self.custom_backward = False    # If true, then the user must call backward themselves.
+        self.loss_names = ["loss"]      # If the loss is a tuple, then this should be a list of the names of the losses.
 
         # Fit function parameters
         self._train_X: TorchDataset
@@ -63,8 +65,8 @@ class NeuralNetwork:
         self._metrics: Mapping[str, Callable]
 
         # Fit runtime parameters
-        self._epoch: int  # SAVED
-        self._batch: int  # SAVED
+        self._epoch: int        # SAVED
+        self._batch: int        # SAVED
         self._batch_data: Any
         self._batch_out: MaybeIterable[torch.Tensor]
         self._batch_loss: MaybeIterable[torch.Tensor]
@@ -248,7 +250,7 @@ class NeuralNetwork:
             self._notify(f"on_{self._pass_type}_batch_begin")
 
             self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
-            if self._pass_type == "train":
+            if self._pass_type == "train" and not self.custom_backward:
                 self.backward(self._batch_loss, self.optimizer)
 
             self._notify(f"on_{self._pass_type}_batch_end")
@@ -447,7 +449,7 @@ class NeuralNetwork:
         '''
         batch_data = to_device(batch_data, self._device)
         X, y = self.unpack_score_batch(batch_data)
-        out = self.module(X)
+        out = self.module(X)  # TODO: Why did I not use self.forward here?
         
         if score_func is None:
             score = self.compute_loss(out, y).item()
@@ -530,7 +532,7 @@ class NeuralNetwork:
 
     def state_dict(self):
         return {
-            "module_state": self.get_module_weights(),
+            "module_state": self.get_module_weights(),  # Can modify get_module_weights to return a dict {"module_state": state_dict}
             "original_module_state": self._original_state_dict,
             "using_original": self._using_original,
             "optimizer_state": self.optimizer.state_dict(),
