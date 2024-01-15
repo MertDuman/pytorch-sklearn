@@ -351,10 +351,14 @@ class LossPlotter(Callback):
     def on_train_epoch_end(self, net):
         if net._epoch % self.per_step == 0:
             self.plot_metrics(net)
+            if self.savefig:
+                self.fig.savefig(self.savename, bbox_inches="tight")
 
     def on_val_epoch_end(self, net):
         if net._epoch % self.per_step == 0:
             self.plot_metrics(net)
+            if self.savefig:
+                self.fig.savefig(self.savename, bbox_inches="tight")
 
     def plot_metrics(self, net):
         track = net.history.track

@@ -34,6 +34,9 @@ TODO:
 
 - If fit() is called a second time, when the model is using best weights, it will keep training. Should it?
    Maybe produce a warning which asks if we should continue training with these new weights.
+
+- If net.predict() is called within a callback, it will change the pass_type to 'test', even though we are still in 'train'. It should set pass_type to
+  'train' again, once it is finished.
 """
 
 
