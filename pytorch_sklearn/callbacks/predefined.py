@@ -284,6 +284,7 @@ class LossPlotter(Callback):
                  savename=None,
                  plot_kw=None,
                  figure_kw=None,
+                 interactive=False,
                  new_backend="Qt5Agg",
                  pyplot_name="matplotlib.pyplot",):
         super().__init__()
@@ -298,6 +299,7 @@ class LossPlotter(Callback):
             assert self.savename is not None, "You must provide a savename."
         self.plot_kw = {} if plot_kw is None else plot_kw
         self.figure_kw = {} if figure_kw is None else figure_kw
+        self.interactive = interactive
         self.new_backend = new_backend
         self.old_backend = mpl.get_backend()
         self.pyplot_name = pyplot_name
@@ -312,7 +314,8 @@ class LossPlotter(Callback):
 
     def on_fit_begin(self, net):
         # self.switch_qt5()
-        plt.ion()  # turn on interactive mode
+        if self.interactive:
+            plt.ion()  # turn on interactive mode
 
         num_metrics = net.history.num_metrics
         nrows = int(np.ceil(num_metrics / self.max_col))
