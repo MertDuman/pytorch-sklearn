@@ -325,14 +325,16 @@ class LossPlotter(Callback):
             # self.axes[i // self.max_col, i % self.max_col].set_visible(False)
 
         # Define empty lines for loss line
-        self.axes[0, 0].set_title(f"{net.criterion.__class__.__name__}")
-        self.axes[0, 0].plot([], [], "-o", label="train loss", **self.plot_kw)
-        if net._validate:
-            self.axes[0, 0].plot([], [], "-o", label="val loss", **self.plot_kw)
-        self.axes[0, 0].legend()
+        for i, name in enumerate(net.loss_names):
+            ax = self.axes[i // self.max_col, i % self.max_col]
+            ax.set_title(f"{name}")
+            ax.plot([], [], "-o", label=f"train {name}", **self.plot_kw)
+            if net._validate:
+                ax.plot([], [], "-o", label=f"val {name}", **self.plot_kw)
+            ax.legend()
 
         # Define empty lines for other metric lines
-        for i, name in enumerate(net._metrics.keys(), start=1):
+        for i, name in enumerate(net._metrics.keys(), start=len(net.loss_names)):
             ax = self.axes[i // self.max_col, i % self.max_col]
             ax.set_title(f"{name.capitalize()}")
             ax.plot([], [], "-o", label=f"train {name}", **self.plot_kw)
@@ -356,10 +358,12 @@ class LossPlotter(Callback):
         line_idx = 0 if net._pass_type == "train" else 1
 
         # Change plot for loss line
-        data = track[f"{net._pass_type}_loss"]
-        self.axes[0, 0].lines[line_idx].set_data(np.arange(len(data)), data)
-        self.axes[0, 0].relim()
-        self.axes[0, 0].autoscale_view()
+        for i, name in enumerate(net.loss_names):
+            data = track[f"{net._pass_type}_{name}"]
+            ax = self.axes[i // self.max_col, i % self.max_col]
+            ax.lines[line_idx].set_data(np.arange(len(data)), data)
+            ax.relim()
+            ax.autoscale_view()
 
         # Change plot for other metric lines
         for i, name in enumerate(net._metrics.keys(), start=1):
