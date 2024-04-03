@@ -275,6 +275,69 @@ class Verbose(Callback):
         print_progress(net._batch, net._num_batches, opt=opt, notebook=self.notebook, old_version=self.old_version)
 
 
+
+class BatchHistory(Callback):
+    def __init__(self):
+        super().__init__()
+        self.name = "BatchHistory"
+        self.track = {}
+        self.sessions = []
+        self.key_index = {}  # given key in track, return index in epoch_metrics.
+        self.num_metrics = -1
+        self.session = -1
+        self.last_epoch_metrics: np.ndarray
+
+    def init_track(self, net, pass_type):
+        # Register losses returned from fit_batch
+        for i, name in enumerate(net.loss_names):
+            if f"{pass_type}_{name}" not in self.track:
+                self.track[f"{pass_type}_{name}"] = []
+                self.key_index[f"{pass_type}_{name}"] = i
+
+        # Register metrics
+        for i, name in enumerate(net._metrics.keys(), start=len(net.loss_names)):
+            if f"{pass_type}_{name}" not in self.track:
+                self.track[f"{pass_type}_{name}"] = []
+                self.key_index[f"{pass_type}_{name}"] = i
+
+    def on_fit_begin(self, net):
+        self.session += 1
+        self.num_metrics = len(net._metrics) + len(net.loss_names)
+        self.init_track(net, "train")
+        if net._validate:
+            self.init_track(net, "val")
+        session_start = len(self.track[next(iter(self.track))]) + 1  # new session starts at epoch = len(first_key) + 1
+        self.sessions.append(session_start)
+
+    def on_train_epoch_begin(self, net):
+        self.last_epoch_metrics = np.zeros(self.num_metrics)  # reset last epoch metrics
+
+    def on_val_epoch_begin(self, net):
+        self.last_epoch_metrics = np.zeros(self.num_metrics)  # reset last epoch metrics
+
+    def on_train_batch_end(self, net):
+        self._save_batch_data(net)
+
+    def on_val_batch_end(self, net):
+        self._save_batch_data(net)
+
+    def _save_batch_data(self, net):
+        # Calculate data
+        epoch_metrics = net.history.epoch_metrics - self.last_epoch_metrics  # current batch loss
+        self.last_epoch_metrics = net.history.epoch_metrics.copy()  # save for next batch
+
+        # Save losses returned from fit_batch
+        for i, name in enumerate(net.loss_names):
+            self.track[f"{net._pass_type}_{name}"].append(epoch_metrics[i])
+            
+        # Save metrics
+        for i, name in enumerate(net._metrics.keys(), start=len(net.loss_names)):
+            self.track[f"{net._pass_type}_{name}"].append(epoch_metrics[i])
+
+
+
+
+
 class LossPlotter(Callback):
     def __init__(self,
                  per_step=1,

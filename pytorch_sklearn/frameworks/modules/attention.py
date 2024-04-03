@@ -79,7 +79,7 @@ class SelfAttention2d(nn.Module):
     def __init__(self, dim, num_heads, bias):
         super().__init__()
         self.num_heads = num_heads
-        self.mha = nn.MultiheadAttention(dim, num_heads, bias=bias)
+        self.mha = nn.MultiheadAttention(dim, num_heads, bias=bias)  # NOT batch first ???
         self.ln = nn.LayerNorm(dim)
         self.ff_self = nn.Sequential(
             nn.LayerNorm(dim),
@@ -97,3 +97,4 @@ class SelfAttention2d(nn.Module):
         attn = self.ff_self(attn) + attn
         attn = rearrange(attn, 'n (h w) c -> n c h w', h=H, w=W)
         return attn
+    

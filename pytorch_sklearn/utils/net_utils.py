@@ -288,7 +288,8 @@ def try_load_cyclegan_from_csv(
     module_list: Iterable[str] = None,
     device: str = None,
     cyclegan_class: Type[CycleGAN] = CycleGAN,
-    supress_warnings: bool = False
+    supress_warnings: bool = False,
+    strict: bool = True,
 ): 
     '''
     Tries to load the CycleGAN network from a csv file.
@@ -346,7 +347,8 @@ def try_load_cyclegan_from_csv(
         module_list=module_list,
         device=device,
         cyclegan_class=cyclegan_class,
-        supress_warnings=supress_warnings
+        supress_warnings=supress_warnings,
+        strict=strict
     )
 
 
@@ -363,7 +365,8 @@ def try_load_r2cgan_from_csv(
     module_list: Iterable[str] = None,
     device: str = None,
     r2cgan_class: Type[R2CGAN] = R2CGAN,
-    supress_warnings: bool = False
+    supress_warnings: bool = False,
+    strict: bool = True
 ): 
     '''
     Tries to load the R2CGAN network from a csv file.
@@ -421,6 +424,8 @@ def try_load_r2cgan_from_csv(
         module_list=module_list,
         device=device,
         cyclegan_class=r2cgan_class,
+        supress_warnings=supress_warnings,
+        strict=strict
     )
         
 
@@ -438,7 +443,8 @@ def _try_load_cyclegan_from_csv(
     module_list: Iterable[str] = None,
     device: str = None,
     cyclegan_class = CycleGAN,
-    supress_warnings: bool = False
+    supress_warnings: bool = False,
+    strict: bool = True,
 ): 
     import sys
     callbacks = [] if callbacks is None else callbacks
@@ -568,11 +574,11 @@ def _try_load_cyclegan_from_csv(
     net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
     weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
     
-    cyclegan_class.load_class(net, callbacks, net_path)
+    cyclegan_class.load_class(net, callbacks, net_path, strict=strict)
 
     if load_best:
         try:
-            net.load_weights_from_path(weight_path)
+            net.load_weights_from_path(weight_path, strict=strict)
         except:
             if not supress_warnings: print('Did not find best weights, using original.')
 
@@ -599,7 +605,8 @@ def try_load_gan_from_csv(
     device: str = None,
     gan_class = GAN,
     supress_warnings: bool = False,
-    raise_errors: bool = False
+    raise_errors: bool = False,
+    strict: bool = True,
 ): 
     '''
     Tries to load the GAN network from a csv file.
@@ -781,11 +788,11 @@ def try_load_gan_from_csv(
     net_path = osj(unique_folder, 'net.pth') if net_path is None else (osj(unique_folder, net_path) if relative_path else net_path)
     weight_path = osj(unique_folder, 'weights.pth') if weight_path is None else (osj(unique_folder, weight_path) if relative_path else weight_path)
     
-    gan_class.load_class(net, callbacks, net_path)
+    gan_class.load_class(net, callbacks, net_path, strict=strict)
 
     if load_best:
         try:
-            net.load_weights_from_path(weight_path)
+            net.load_weights_from_path(weight_path, strict=strict)
         except:
             if not supress_warnings: print('Did not find best weights, using original.')
             if raise_errors: raise
