@@ -94,17 +94,18 @@ class History(Callback):
         self._calculate_metrics(net)
 
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
-        batch_out = to_safe_tensor(net._batch_out)
-        # TODO: A better fix for this - fails when user returns a tuple even if there is a single loss.
-        batch_loss = net._batch_loss if len(net.loss_names) > 1 else (net._batch_loss, )
+        with torch.no_grad():
+            # batch_out = to_safe_tensor(net._batch_out)
+            # TODO: A better fix for this - fails when user returns a tuple even if there is a single loss.
+            batch_loss = net._batch_loss if len(net.loss_names) > 1 else (net._batch_loss, )
 
-        # Calculate losses returned from fit_batch
-        for i, name in enumerate(net.loss_names):
-            self.epoch_metrics[i] += batch_loss[i].item()
-            
-        # Calculate metrics
-        for i, metric in enumerate(net._metrics.values(), start=len(net.loss_names)):
-            self.epoch_metrics[i] += metric(batch_out, net._batch_data)
+            # Calculate losses returned from fit_batch
+            for i, name in enumerate(net.loss_names):
+                self.epoch_metrics[i] += batch_loss[i].item()
+                
+            # Calculate metrics
+            for i, metric in enumerate(net._metrics.values(), start=len(net.loss_names)):
+                self.epoch_metrics[i] += metric(net._batch_out, net._batch_data)  # metric must return a scalar or a tensor with a single element
 
 
 class CycleGANHistory(History):
@@ -155,10 +156,11 @@ class CycleGANHistory(History):
             self.track[f"{net._pass_type}_{name}"].append(self.epoch_metrics[i])
 
     def _calculate_metrics(self, net: "psk.NeuralNetwork"):
-        batch_out = to_safe_tensor(net._batch_out)
-        self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]  # 0:4 diff from History
-        for i, metric in enumerate(net._metrics.values(), start=4):  # 1 -> 4 diff from History
-            self.epoch_metrics[i] += metric(batch_out, net._batch_data)
+        with torch.no_grad():
+            # batch_out = to_safe_tensor(net._batch_out)
+            self.epoch_metrics[0:4] += [loss.item() for loss in net._batch_loss]  # 0:4 diff from History
+            for i, metric in enumerate(net._metrics.values(), start=4):  # 1 -> 4 diff from History
+                self.epoch_metrics[i] += metric(net._batch_out, net._batch_data)
 
 
 class Verbose(Callback):

@@ -61,7 +61,7 @@ class GAN(NeuralNetwork):
         return self.G(X)
     
     def fit_batch(self, batch_data):
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         noise, real = self.unpack_fit_batch(batch_data)
 
         fake = self.forward(noise)
@@ -83,7 +83,7 @@ class GAN(NeuralNetwork):
         return [fake, fake_g_logits], [G_loss, D_loss]
     
     def predict_batch(self, batch_data, decision_func = None, **decision_func_kw):
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         noise = self.unpack_predict_batch(batch_data)
 
         fake = self.forward(noise)
@@ -91,7 +91,7 @@ class GAN(NeuralNetwork):
         return [fake, fake_logits]
         
     def score_batch(self, batch_data, score_func = None, **score_func_kw):
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         noise, real = self.unpack_score_batch(batch_data)
 
         fake = self.forward(noise)
@@ -270,7 +270,7 @@ class CycleGAN(NeuralNetwork):
         batch_data : Any
             Batch data as returned by the dataloader provided to ``fit``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_fit_batch(batch_data)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
@@ -365,7 +365,7 @@ class CycleGAN(NeuralNetwork):
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_predict_batch(batch_data)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
@@ -392,7 +392,7 @@ class CycleGAN(NeuralNetwork):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, B] = self.unpack_score_batch(batch_data)
 
         A2B, B2A, A2B2A, B2A2B, A2A, B2B = self.forward([A, B])
@@ -600,7 +600,7 @@ class R2CGAN(CycleGAN):
         batch_data : Any
             Batch data as returned by the dataloader provided to ``fit``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_fit_batch(batch_data)
 
         A2B, yA2B = self.G_A(A)
@@ -682,7 +682,7 @@ class R2CGAN(CycleGAN):
         **decision_func_kw
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_predict_batch(batch_data)
 
         A2B, yA2B = self.G_A(A)
@@ -714,7 +714,7 @@ class R2CGAN(CycleGAN):
         **score_func_kw
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         _, [A, yA, B, yB] = self.unpack_score_batch(batch_data)
 
         A2B, yA2B = self.G_A(A)

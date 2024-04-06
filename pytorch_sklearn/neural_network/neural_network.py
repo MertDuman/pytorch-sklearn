@@ -26,8 +26,6 @@ TODO:
 
 - If train_X is passed as a dataloader, then batch_size should automatically be set to the batch_size of the dataloader.
 
-- metrics should just take batch_out, batch_data as input, and not batch_out, y, because many setups don't separate X and y, e.g. Autoencoders.
-
 - Currently, metrics are calculated per batch, summed up, and then divided by the number of batches. Could add an
   option to calculate metrics for all of the data instead of per batch.
   Could also add a 'reduction' parameter to the metrics, e.g. 'mean' or 'sum' or 'last'.
@@ -250,6 +248,7 @@ class NeuralNetwork:
         self._num_batches = len(data_loader)
         self._notify(f"on_{self._pass_type}_epoch_begin")
         for self._batch, self._batch_data in enumerate(data_loader, start=1):
+            self._batch_data = to_device(self._batch_data, self._device)
             self._notify(f"on_{self._pass_type}_batch_begin")
 
             self._batch_out, self._batch_loss = self.fit_batch(self._batch_data)
@@ -278,7 +277,7 @@ class NeuralNetwork:
         batch_data:
             Batch data as returned by the dataloader provided to ``fit``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         X, y = self.unpack_fit_batch(batch_data)
         out = self.forward(X)
         loss = self.compute_loss(out, y)
@@ -316,6 +315,7 @@ class NeuralNetwork:
             self._notify("on_predict_begin")
             self._pred_y = []
             for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
+                self._batch_data = to_device(self._batch_data, self._device)
                 pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 self._pred_y.append(pred_y)
             self._pred_y = stack_if_list_of_list(self._pred_y)
@@ -353,6 +353,7 @@ class NeuralNetwork:
             self.test()
             self._notify("on_predict_begin")
             for self._batch, self._batch_data in enumerate(self._predict_loader, start=1):
+                self._batch_data = to_device(self._batch_data, self._device)
                 self._pred_y = self.predict_batch(self._batch_data, self._decision_func, **self._decision_func_kw)
                 yield self._pred_y
             self._notify("on_predict_end")
@@ -380,7 +381,7 @@ class NeuralNetwork:
         **decision_func_kw:
             Keyword arguments passed to ``decision_func``, provided to ``predict`` or ``predict_generator``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         X = self.unpack_predict_batch(batch_data)
         out = self.forward(X)
         if decision_func is not None:
@@ -420,6 +421,7 @@ class NeuralNetwork:
             self.test()
             self._score = []
             for self._batch, self._batch_data in enumerate(self._score_loader, start=1):
+                self._batch_data = to_device(self._batch_data, self._device)
                 batch_score = self.score_batch(self._batch_data, self._score_func, **self._score_func_kw)
                 self._score.append(batch_score)
                 
@@ -450,7 +452,7 @@ class NeuralNetwork:
         **score_func_kw:
             Keyword arguments passed to ``score_func``, provided to ``score``.
         '''
-        batch_data = to_device(batch_data, self._device)
+        # batch_data = to_device(batch_data, self._device)
         X, y = self.unpack_score_batch(batch_data)
         out = self.module(X)  # TODO: Why did I not use self.forward here?
         
