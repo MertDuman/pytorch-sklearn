@@ -26,11 +26,11 @@ class TrainingTrackerV2:
         self.config: pd.DataFrame
 
         self.custom_serializer: callable = None
-        
+
 
     def default(self, value, default):
         return value if value is not None else default
-        
+
 
     def configure(self, folder: list, hyperparameters: dict, metrics: dict=None, misc: dict=None, comment: str=None):
         self.folder = folder
@@ -283,6 +283,9 @@ class TrainingTrackerV2:
 
 
     def write_config(self):
+        # JSON doesn't support ' as object content, so it converts ' to ", e.g. 'mystrobj' -> '"mystrobj"'
+        # CSV doesn't support " as object content, so it converts " to "", e.g. '"mystrobj"' -> """mystrobj"""
+        # Therefore, all strings in the saved csv have """. This is not a problem when reading the csv.
         self.config.to_csv(osj(self.folder, "config.csv"))
 
 
@@ -297,6 +300,7 @@ class TrainingTrackerV2:
         # set misc as "" if not passed.
         misc_maybe_missing = [misc[k] if k in misc else "" for k in self.misc]
         hypervals = [json.dumps(val, default=self.default_serializer) for val in hyperparameters.values()]
+        print(hypervals)
         metricvals = [""] * len(self.metric_keys)
         miscvals = [json.dumps(val, default=self.default_serializer) for val in misc_maybe_missing]
 
