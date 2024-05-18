@@ -568,11 +568,14 @@ class EarlyStopping(Callback):
     Implements early stopping functionality to the added NeuralNetwork.
     It will monitor the given metric as `monitor` and if that metric does not improve
     `patience` times in a row, training will be stopped early.
+    If threshold is passed, then the training is stopped when the tracked metric gets better than the threshold.
+    In this case, patience is ignored.
     """
-    def __init__(self, tracked: str, mode: str, patience: int = 20):
+    def __init__(self, tracked: str, mode: str, patience: int = 20, threshold: float = None):
         super(EarlyStopping, self).__init__()
         self._tally = Tally(recorded=tracked, mode=mode, best_epoch=-1, best_weights=None)
         self.patience = patience
+        self.threshold = threshold
         self.current_patience = 0
 
     def state_dict(self):
@@ -619,9 +622,18 @@ class EarlyStopping(Callback):
 
             self.current_patience = 0
         else:
-            self.current_patience += 1
-            if self.current_patience >= self.patience:
-                net.keep_training = False
+            if self.threshold is None:
+                self.current_patience += 1
+                if self.current_patience >= self.patience:
+                    net.keep_training = False
+
+        if self.threshold is not None:
+            if self._tally.mode == 'max':
+                if new_record > self.threshold:
+                    net.keep_training = False
+            elif self._tally.mode == 'min':
+                if new_record < self.threshold:
+                    net.keep_training = False
 
 
 class LRScheduler(Callback):

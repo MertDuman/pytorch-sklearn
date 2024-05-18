@@ -557,6 +557,20 @@ tt.finalize_training(
 )
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # %%
 ### TRAINING TRACKER V2 MERGED ###
 from pytorch_sklearn.utils.training_tracker_v2 import TrainingTrackerV2
@@ -579,9 +593,9 @@ class TempDS(Dataset):
             return self.data[index]
         return self.data[index], self.data[index]
     
-train = False
+train = True
 test = not train
-load_checkpoint = True
+load_checkpoint = False
 checkpoint_id = 0
 
 tt = TrainingTrackerV2()
@@ -627,7 +641,7 @@ tt.configure(
     )
 )
 
-lr = 1e-3
+lr = 1e-6
 hypers=dict(
     model=nn.Sequential,
     model_ctor=dict(),
@@ -747,6 +761,7 @@ else:
 
     for i, out in enumerate(out_gen):
         if i >= 5:
+            out_gen.close()
             break
 
         print(out.shape)
