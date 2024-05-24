@@ -131,10 +131,12 @@ class Tally:
     """
     Tally a given record's best state.
     """
-    def __init__(self, recorded: str, mode: str, **kwargs):
+    def __init__(self, recorded: str, mode: str, threshold: float = 0, threshold_mode = 'rel', **kwargs):
         self.__dict__.update(kwargs)
         self.recorded = recorded
         self.mode = mode
+        self.threshold = threshold
+        self.threshold_mode = threshold_mode
         self.best_record = -np.Inf if mode == "max" else np.Inf
 
     def state_dict(self):
@@ -144,9 +146,19 @@ class Tally:
         self.__dict__.update(state_dict)
 
     def is_better_record(self, new_record):
-        if self.mode == "max":
-            return new_record > self.best_record
-        return new_record < self.best_record
+        if self.mode == 'min' and self.threshold_mode == 'rel':
+            rel_epsilon = 1. - self.threshold
+            return new_record < self.best_record * rel_epsilon
+
+        elif self.mode == 'min' and self.threshold_mode == 'abs':
+            return new_record < self.best_record - self.threshold
+
+        elif self.mode == 'max' and self.threshold_mode == 'rel':
+            rel_epsilon = self.threshold + 1.
+            return new_record > self.best_record * rel_epsilon
+
+        else:  # mode == 'max' and epsilon_mode == 'abs':
+            return new_record > self.best_record + self.threshold
 
     def evaluate_record(self, new_record, **kwargs):
         """

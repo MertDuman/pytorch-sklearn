@@ -754,7 +754,105 @@ class LRScheduler(Callback):
         elif interval[1] == -1:
             interval[1] = float("inf")
         return interval
-    
+
+
+
+
+class LRSchedulingEarlyStopper(Callback):
+    """
+    Monitors the given metric and applies the learning rate scheduler if the metric doesn't improve for `patience` times in a row.
+    When the scheduler is stepped 'max_steps' times and after that the metric doesn't improve for 'patience' times, training is stopped.
+
+    Parameters
+    ----------
+    lr_scheduler
+        Scheduler to step.
+    max_steps : int
+        The lr will be stepped at most this many times, after which training will be stopped.
+    tracked : str
+        The metric to monitor.
+    mode : str
+        Which way the metric should improve, 'min' or 'max'.
+    patience : int
+        The number of times the metric can not improve before lr scheduler is stepped or training is stopped.
+    patience_multiplier : int
+        When the lr scheduler is stepped, the patience is multiplied by this number. This way patience decreases as the metric fails to improve.
+        When the metric improves, the patience is reset to the original value.
+    min_patience : int
+        The minimum patience value. Maximum is always the original value.
+    relevance_threshold : float
+        For a new metric to be considered better, it must be better than the previous metric by this amount.
+        E.g. mode=max, relevance_threshold=0.1, relevance_threshold_mode=abs then new_metric must be at least 0.1 larger than the previous metric to be considered better.
+    relevance_threshold_mode : str
+        'abs' or 'rel'. If 'abs', the relevance_threshold is an absolute value. If 'rel', the relevance_threshold is relative to current best.
+        E.g. mode=max, and this is 'rel', then new_metric > best_metric * (1 + relevance_threshold) is considered better.
+        E.g. mode=max, and this is 'abs', then new_metric > best_metric + relevance_threshold is considered better.
+    """
+    def __init__(self, lr_scheduler, max_steps: int, tracked: str, mode: str, patience: int = 20, patience_multiplier=1, min_patience=0, relevance_threshold=0, relevance_threshold_mode='rel'):
+        super().__init__()
+        self.lr_scheduler = lr_scheduler
+        self.max_steps = max_steps
+        self._tally = Tally(recorded=tracked, mode=mode, threshold=relevance_threshold, threshold_mode=relevance_threshold_mode, best_epoch=-1, best_weights=None)
+        self.patience = patience
+        self.patience_multiplier = patience_multiplier
+        self.max_patience = patience
+        self.min_patience = min_patience
+
+        self.current_step = 0
+        self.current_patience = 0
+
+    def state_dict(self):
+        return {
+            "current_step": self.current_step,
+            "current_patience": self.current_patience,
+            "tally_state": self._tally.state_dict(),
+            "lr_scheduler": self.lr_scheduler.state_dict()
+        }
+
+    def load_state_dict(self, state_dict: dict):
+        lr_scheduler_state = state_dict.pop("lr_scheduler")
+        tally_state = state_dict.pop("tally_state")
+        self.__dict__.update(state_dict)
+        self.lr_scheduler.load_state_dict(lr_scheduler_state)
+        self._tally.load_state_dict(tally_state)
+
+    def on_train_epoch_end(self, net):
+        if not net._validate:
+            self._track(net)
+
+    def on_val_epoch_end(self, net):
+        if net._validate:
+            self._track(net)
+
+    def _track(self, net: "psk.NeuralNetwork"):
+        track = net.history.track
+        new_record = track[self._tally.recorded][-1]
+        is_better_record = self._tally.is_better_record(new_record)
+
+        if is_better_record:
+            self._tally.evaluate_record(new_record=new_record,
+                                        best_epoch=net._epoch,
+                                        best_weights=copy.deepcopy(net.get_module_weights()))
+
+            self.current_patience = 0
+            self.patience = self.max_patience
+        else:
+            # If the record doesn't improve, update patience
+            self.current_patience += 1
+
+            # If we have reached the patience limit
+            if self.current_patience >= self.patience:
+                # If we have reached the max steps, stop training
+                if self.current_step >= self.max_steps:
+                    net.keep_training = False
+                # Otherwise, step the lr scheduler, update step and reset patience
+                else:
+                    self.lr_scheduler.step()
+                    self.current_step += 1
+                    self.current_patience = 0
+                    self.patience = max(self.min_patience, self.patience * self.patience_multiplier)
+
+
 
 class ReceptiveFieldVisualizer(Callback):
     def __init__(self, save_path: str, dummy_input: torch.Tensor, target_output=None, per_epoch=True, create_path=False):
